@@ -1,7 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.ndimage import uniform_filter
-from lc_filter import filter as lc_filter
 import isce
 import isceobj
 import isceobj.Image.IntImage as IntImage
@@ -23,19 +22,46 @@ def eig_decomp(cov):
     shape = cov.shape
     cov = cov.reshape(
         (shape[0] * shape[1], shape[2], shape[3]))
-    W, V = np.linalg.eigh(cov)
-    W = None
-    V = np.transpose(V, axes=(0, 2, 1))
-    # select the last eigenvector (the one corresponding to the largest lambda)
-    v = V[:, shape[-1] - 1]
-    V = None
-    scaling = np.abs(v[:, 0])
-    scaling[scaling == 0] = 1
-    rotation = v[:, 0] / scaling
-    scaling = None
-    v = v * rotation.conj()[:, np.newaxis]
 
-    return v.reshape((shape[0], shape[1], shape[2]))
+    total_pixels = cov.shape[0]
+    n = 50
+    cov_split = np.array_split(cov, n)
+
+    cov = None
+
+    print('Eigenvector Decomposition Progress: 0', end="\r", flush=True)
+    for minicov in cov_split:
+        W, V = np.linalg.eigh(minicov)
+        W = None
+        V = np.transpose(V, axes=(0, 2, 1))
+        # select the last eigenvector (the one corresponding to the largest lambda)
+        v = V[:, shape[-1] - 1]
+        V = None
+        scaling = np.abs(v[:, 0])
+        scaling[scaling == 0] = 1
+        rotation = v[:, 0] / scaling
+        scaling = None
+        v = v * rotation.conj()[:, np.newaxis]
+        if cov is None:
+            cov = v
+        else:
+            cov = np.concatenate((cov, v))
+        print(
+            f'Eigenvector Decomposition Progress: {int((cov.shape[0] / total_pixels) * 100)}%', end="\r", flush=True)
+
+    return cov.reshape((shape[0], shape[1], shape[2]))
+
+
+def compute_tc(cov, phi_est):
+    print('Computing TC')
+    kappa = np.zeros(cov[0, 0].shape, dtype=np.complex64)
+    N = phi_est.shape[2]
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                kappa += np.exp(1j * np.angle((cov[i, j] *
+                                               (phi_est[:, :, j] * phi_est[:, :, i].conj()).conj())))
+    return kappa / (N**2 - N)
 
 
 def get_intensity(cov):
@@ -69,7 +95,6 @@ def multilook(im, ml=(8, 2), thin=(8, 2)):
     '''
         Use a uniform guassian filter to multilook a complex image.
     '''
-    print('Multilook shape: ', ml)
     outshape = (im.shape[0] // ml[0], im.shape[1] // ml[1])
     imf = uniform_filter(im.real, size=ml) + 1j * \
         uniform_filter(im.imag, size=ml)
@@ -249,12 +274,9 @@ def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=N
     '''
 
     if refi == seci and not cov:
-        print('Not returning multilooked image')
         return stack[refi] * stack[seci].conj()
     else:
         if scaling is None:
-            print(
-                'Preparing to form interferogram, getting the coherence normalization factors...')
             scale1 = np.abs(interfere(stack, refi, refi, show=False,
                                       ml=ml, landcover=landcover))
             scale2 = np.abs(interfere(stack, seci, seci, show=False,
@@ -262,8 +284,9 @@ def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=N
             scaling = np.sqrt(scale1 * scale2)
 
     interferogram = stack[refi] * stack[seci].conj()
-    scaling[scaling == 0] = 1
-    interferogram = interferogram / scaling
+    if scaling is not 1:
+        scaling[scaling == 0] = 1
+        interferogram = interferogram / scaling
     # interferogram[np.isnan(interferogram)] = 0
     if ml[0] > 1 and ml[1] > 1:
         if landcover is not None:
@@ -305,7 +328,7 @@ def cov2coh(cov):
     return coh
 
 
-def get_covariance(stack, ml='landcover', ml_size=21, landcover=None, coherence=False):
+def get_covariance(stack, ml='landcover', ml_size=(20, 4), landcover=None, coherence=False, sig=None):
     print('current stack: ', stack.shape)
     if landcover is not None:
         print('Landcover size: ', landcover.shape)
@@ -319,8 +342,11 @@ def get_covariance(stack, ml='landcover', ml_size=21, landcover=None, coherence=
 
     for i in range(slcn):
         for j in range(slcn):
-            cov[i, j, :, :] = interfere(
-                stack, i, j, ml=(ml_size, ml_size), show=False, aspect=1, scaling=scaling, cov=True, landcover=landcover)
+            if j >= i:
+                cov[i, j, :, :] = interfere(
+                    stack, i, j, ml=ml_size, show=False, aspect=1, scaling=scaling, cov=True, landcover=landcover, sig=sig)
+            else:
+                cov[i, j, :, :] = cov[j, i, :, :].conj()
 
     return cov
 

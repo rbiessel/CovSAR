@@ -7,14 +7,13 @@ import isceobj
 import isceobj.Image.IntImage as IntImage
 import isceobj.Image.SlcImage as SLC
 from isceobj.Image import createImage
-
-from lc_filter import filter as lc_filter
 import library as sarlab
 from datetime import datetime as dt
 import argparse
 import glob
 import os
 import shutil
+from covariance import CovarianceMatrix
 
 
 def readInputs():
@@ -51,14 +50,12 @@ def main():
     outputs = inputs.output
     files = glob.glob(stack_path)
     files = sorted(files)
-    # files = files[1:4]
+    files = files[0:3]
 
     dates = []
     for file in files:
-        date = dt.strptime(file.split('/')[-2], '%Y%m%d')
+        date = file.split('/')[-2]
         dates.append(date)
-
-    n = 2
 
     SLCs = None
     # clone = None
@@ -67,29 +64,27 @@ def main():
         landcover = landcover_src.read()[0]
 
     for i in range(len(files)):
-        print('Loading SLC...')
+        print(f'Loading SLC {i} / {len(files)}...')
         im = createImage()
         im.load(files[i] + '.xml')
         mm = im.memMap()
-        print(mm.shape)
         if SLCs is None:
             SLCs = np.zeros(
                 (len(files), mm.shape[0], mm.shape[1]), dtype=np.complex64)
 
         SLCs[i, :, :] = mm[:, :, 0]
 
-    # SLCs = SLCs[:, 527:3055, 1808:8985]
-    SLCs = SLCs[:, 500:1500, 1800:2400]
+    # SLCs = SLCs[:, 100:500, 200:500]
 
-    cov = sarlab.get_covariance(SLCs, ml_size=20, coherence=True)
-    phi_hist_eig = sarlab.eig_decomp(cov)
+    cov = CovarianceMatrix(SLCs, ml_size=(20, 20))
+    SLCs = None
+    coherence = cov.get_coherence()
     cov = None
+
+    phi_hist_eig = sarlab.eig_decomp(coherence)
     phi_hist_eig = phi_hist_eig.conj()
-
-    for i in range(3):
-        plt.imshow(np.angle(phi_hist_eig[:, :, i]))
-        plt.show()
-
+    kappa = sarlab.compute_tc(coherence, phi_hist_eig)
+    return
     # Check if output folder exists already
     if os.path.exists(os.path.join(os.getcwd(), outputs)):
         print('Output folder already exists, clearing it')
@@ -98,18 +93,21 @@ def main():
     print('creating output folder')
     os.mkdir(os.path.join(os.getcwd(), outputs))
 
-    for i in range(phi_hist_eig.shape[2]):
-        print(phi_hist_eig[:, :, i].shape)
-
-        date_str = dates[i].strftime('%Y%m%d')
-        os.mkdir(os.path.join(os.getcwd(), outputs, date_str))
+    # Write out nearest neighbor pairs
+    for i in range(1, phi_hist_eig.shape[2]):
+        phi = phi_hist_eig[:, :, i] * phi_hist_eig[:, :, i - 1].conj()
+        date_str = dates[i]
+        ref_date = dates[i - 1]
+        date_str = f'{ref_date}_{date_str}'
+        os.mkdir(os.path.join(os.getcwd(), outputs, f'{date_str}'))
         int_path = os.path.join(os.getcwd(), outputs,
                                 date_str, f'{date_str}_wrapped.int')
-        coh_path = os.path.join(os.getcwd(), outputs,
-                                date_str, f'{date_str}_coherence.int')
 
-        write_image(int_path, np.angle(phi_hist_eig[:, :, i]))
-        write_image(coh_path, np.abs(phi_hist_eig[:, :, i]))
+        write_image(int_path, np.angle(phi))
+
+    kappa_path = os.path.join(os.getcwd(), outputs,
+                              '../temporal_coherence.int')
+    write_image(kappa_path, np.abs(kappa))
 
 
 main()
