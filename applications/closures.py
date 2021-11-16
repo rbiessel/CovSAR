@@ -19,43 +19,77 @@ def get_adjacent_triplets(num):
     return np.sort(np.array(triplets))
 
 
-def get_triplets(num):
-
+def get_triplets(num, force=None):
     numbers = np.arange(0, num, 1)
-    # print(numbers)
-
     permutations = np.array(list(itertools.permutations(numbers, 3)))
-    permutations = np.sort(permutations, axis=1)
-    permutations = np.unique(permutations, axis=1)
+    combinations = np.sort(permutations, axis=1)
+    combinations = np.unique(combinations, axis=0)
+    if force is not None:
+        combinations = np.array(
+            [triplet for triplet in combinations if triplet[0] == force])
 
-    return permutations
+    return combinations
 
 
-def get_triplet_covariance(cov):
-    phi_cov = get_phase_covariance(cov, count=(30**2))
-    print(phi_cov.shape)
+def build_A(triplets, phi_indexes):
+    A = np.zeros((triplets.shape[0], len(phi_indexes)))
+    for i in range(triplets.shape[0]):
+        a = A[i]
+        triplet = triplets[i]
+        a[np.where(phi_indexes == f'{triplet[0]}{triplet[1]}')] = 1
+        a[np.where(phi_indexes == f'{triplet[0]}{triplet[2]}')] = -1
+        a[np.where(phi_indexes == f'{triplet[1]}{triplet[2]}')] = 1
+    print('Rank:', np.linalg.matrix_rank(A), 'Shape: ', A.shape)
+    return A
+
+
+def get_triplet_covariance(cov, triplets):
+    phi_cov, indexes = get_phase_covariance(
+        cov, count=(30**2))  # dont hard-code the sample size
+    A = build_A(triplets, indexes)
     phi_cov = np.swapaxes(phi_cov, 0, 2)
     phi_cov = np.swapaxes(phi_cov, 1, 3)
-    df = int(special.comb(cov.shape[0] - 1, 2))
-    A = np.array([[1, 1, -1], ] * df)
     triplet_covariance = A @ phi_cov @ A.T
-    return triplet_covariance
+    return triplet_covariance, indexes, A
 
 
-def get_closure_significance(triplet, triplet_variance):
-    k = special.comb(2, 2)
+def get_closure_significance(closures, triplet_covariance, N):
+    k = special.comb(N-1, 2)
     print(f'{k} degrees of freedom')
-    triplet_variance = np.squeeze(triplet_variance)
-    # return 1, 1
-    S = np.angle(triplet) * triplet_variance**-1 * np.angle(triplet)
+    triplet_covariance = np.squeeze(triplet_covariance)
+
+    # Does this need to be the full Sigma_xi matrix inverse?
+
+    closures = closures[:, :, :, np.newaxis]
+    print(closures.shape)
+    print(triplet_covariance.shape)
+    S = np.transpose(closures, (0, 1, 3, 2)
+                     ) @ np.linalg.inv(triplet_covariance) @ closures
 
     return 1 - chi2.cdf(S, df=k), S
 
 
 def write_closures(coherence, folder):
-    trip_covar = get_triplet_covariance(coherence)
-
+    N = coherence.shape[0]
+    # triplets = get_triplets(coherence.shape[0], force=0)
     triplets = get_adjacent_triplets(coherence.shape[0])
+    trip_covar, indexes, A = get_triplet_covariance(coherence, triplets)
+    coherence = np.angle(coherence).astype(np.float32)
+
+    indexes = np.triu_indices_from(coherence[:, :, 1, 1], k=1)
+    coherence = coherence[indexes]
+
+    coherence = np.swapaxes(coherence, 0, 1)
+    coherence = np.swapaxes(coherence, 2, 1)
+
+    closures = np.squeeze(A @ coherence[:, :, :, np.newaxis])
+
+    closures = (closures + np.pi) % (2 * np.pi) - np.pi
+    # plt.imshow(closures[:, :, 1])
+    # plt.show()
+
+    pval, S = get_closure_significance(closures, trip_covar, N=N)
+    pval = np.squeeze(pval).astype(np.float32)
 
     folder_path = os.path.join(
         '/Users/rbiessel/Documents/InSAR/Toolik/Fringe', folder)
@@ -63,25 +97,19 @@ def write_closures(coherence, folder):
         print('Output folder already exists, clearing it')
         shutil.rmtree(folder_path)
     os.mkdir(folder_path)
+    print(closures.shape)
 
-    for triplet in triplets:
+    pval_out = os.path.join(folder_path, 'pval.closure')
+    io.write_image(pval_out, pval)
 
-        triplet = coherence[triplet[0], triplet[1]] * coherence[triplet[1],
-                                                                triplet[2]] * coherence[triplet[0], triplet[2]].conj()
-
-        pval, s = get_closure_significance(triplet, trip_covar)
-        pval = pval.astype(np.float32)
-        fig, ax = plt.subplots(nrows=1, ncols=3)
-        ax[0].imshow(pval)
-        ax[1].imshow(np.angle(triplet))
-        ax[2].imshow(np.log10(np.abs(triplet)))
-        plt.show()
-        outpath = os.path.join(
-            folder_path, f'pval.closure')
-        io.write_image(outpath, pval)
+    for i in range(triplets.shape[0]):
+        triplet = triplets[i]
         closure_out = os.path.join(
-            folder_path, f'x123.closure')
-        io.write_image(closure_out, np.angle(triplet))
+            folder_path, f'Xi_{triplet[0]}{triplet[1]}{triplet[2]}.closure')
+        print(closures.dtype)
+        plt.imshow(closures[:, :, i])
+        plt.show()
+        io.write_image(closure_out, closures[:, :, i].astype(np.float32))
 
 
 def get_phase_covariance(cov, count=0):
@@ -107,7 +135,7 @@ def get_phase_covariance(cov, count=0):
 
         t1 = np.abs(cov[i, k]) * np.abs(cov[j, l]) * np.cos(c1 - c3)
         t2 = np.abs(cov[i, l]) * np.abs(cov[j, k]) * np.cos(c2 + c3)
-
+        print('Computed Phase Variance')
         return ((t1 - t2) * norm).astype(np.float64)
 
     index_matrix = []
@@ -132,4 +160,4 @@ def get_phase_covariance(cov, count=0):
             l = int(cov_indexes[b][1])
             phi_cov[a, b] = get_phi_cov(cov, i, j, k, l)
 
-    return phi_cov
+    return phi_cov, cov_indexes
