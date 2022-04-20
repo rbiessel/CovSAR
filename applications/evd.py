@@ -1,3 +1,5 @@
+from numpy.core.arrayprint import _leading_trailing
+from numpy.lib.polynomial import polyval
 import rasterio
 from matplotlib import pyplot as plt
 import numpy as np
@@ -10,6 +12,7 @@ import shutil
 from covariance import CovarianceMatrix
 import isceio as io
 import closures
+import scipy.stats as stats
 
 
 def readInputs():
@@ -25,35 +28,7 @@ def readInputs():
     return args
 
 
-def main():
-    inputs = readInputs()
-    stack_path = inputs.path
-    stack_path = os.path.expanduser(stack_path)
-    outputs = inputs.output
-    files = glob.glob(stack_path)
-    files = sorted(files)
-    files = files[1:7]
-
-    dates = []
-    for file in files:
-        date = file.split('/')[-2]
-        dates.append(date)
-
-    # clone = None
-    if inputs.landcover:
-        landcover_src = rasterio.open(inputs.landcover)
-        landcover = landcover_src.read()[0]
-
-    SLCs = io.load_stack(files)
-    # SLCs = SLCs[:, 100:400, 100:300]
-    print(SLCs.shape)
-    cov = CovarianceMatrix(SLCs, ml_size=(30, 30))
-    SLCs = None
-    coherence = cov.get_coherence()
-    closures.write_closures(coherence, 'closures')
-    return
-    # intensity = cov.get_intensity()
-    cov = None
+def write_timeseries(phi_hist_eig, dates, kappa, outputs):
 
     # Check if output folder exists already
     if os.path.exists(os.path.join(os.getcwd(), outputs)):
@@ -62,10 +37,6 @@ def main():
 
     print('creating output folder')
     os.mkdir(os.path.join(os.getcwd(), outputs))
-
-    phi_hist_eig = sarlab.eig_decomp(coherence)
-    phi_hist_eig = phi_hist_eig.conj()
-    kappa = sarlab.compute_tc(coherence, phi_hist_eig)
 
     # Write out nearest neighbor pairs
     for i in range(1, phi_hist_eig.shape[2]):
@@ -85,8 +56,45 @@ def main():
         # io.write_image(intensity_path, db)
 
     kappa_path = os.path.join(os.getcwd(), outputs,
-                              '../temporal_coherence.int')
+                              './temporal_coherence.int')
     io.write_image(kappa_path, np.abs(kappa))
 
 
-main()
+def main():
+    inputs = readInputs()
+    stack_path = inputs.path
+    stack_path = os.path.expanduser(stack_path)
+    outputs = inputs.output
+    files = glob.glob(stack_path)
+    files = sorted(files)
+    # files = files[4:-1]
+
+    dates = []
+    for file in files:
+        date = file.split('/')[-2]
+        dates.append(date)
+
+    # clone = None
+    if inputs.landcover:
+        landcover = np.squeeze(rasterio.open(inputs.landcover).read())
+        print('landcover:')
+        print(landcover.shape)
+
+    SLCs = io.load_stack(files)
+    print(SLCs.shape)
+
+    cov = CovarianceMatrix(SLCs, ml_size=(
+        21, 21), sample=(7, 7))
+    SLCs = None
+    coherence = cov.get_coherence()
+    cov = None
+
+    phi_hist_eig = sarlab.eig_decomp(coherence)
+    phi_hist_eig = phi_hist_eig.conj()
+    kappa = sarlab.compute_tc(coherence, phi_hist_eig)
+
+    write_timeseries(phi_hist_eig, dates, kappa, outputs)
+
+
+if __name__ == "__main__":
+    main()

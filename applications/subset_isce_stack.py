@@ -30,6 +30,8 @@ def readInputs():
                         dest='cols', required=False, help='Latitudnal bounds')
     parser.add_argument('-o', '--output', type=str,
                         dest='output', required=True, help='Output folder to save stack to')
+    parser.add_argument('-s', '--sample', type=int, nargs=2,
+                        dest='sample_size', required=True, help='Output folder to save stack to')
     args = parser.parse_args()
 
     return args
@@ -42,17 +44,21 @@ def load_image(path, name):
     return im.memMap().copy()
 
 
-def subset_image(inpath, outpath, x1, x2, y1, y2):
+def subset_image(inpath, outpath, x1, x2, y1, y2, sample=None):
     im = createImage()
     im.load(inpath + '.xml')
     mm = im.memMap()
     print(inpath, mm.shape)
-    if 'los.rdr.full' in inpath or 'shadowMask.rdr.full' in inpath:
+    if 'los.rdr.full' in inpath or 'shadowMask.rdr.full' in inpath or 'incLocal.rdr.full' in inpath:
         data = mm[y1:y2, :, x1:x2]
+        if sample is not None:
+            data = data[::sample[0], :, ::sample[1]]
         width = data.shape[2]
         height = data.shape[0]
     else:
         data = mm[y1:y2, x1:x2]
+        if sample is not None:
+            data = data[::sample[0], ::sample[1]]
         width = data.shape[1]
         height = data.shape[0]
 
@@ -133,15 +139,15 @@ def main():
 
     print(x1, x2, y1, y2)
     files = ['lat.rdr.full', 'lon.rdr.full', 'hgt.rdr.full',
-             'los.rdr.full', 'shadowMask.rdr.full']
+             'los.rdr.full', 'shadowMask.rdr.full', 'incLocal.rdr.full']
 
-    print(base_path)
     # Subset Geometry Files
     for file in files:
         in_path = os.path.join(base_path, geom_dir, file)
         out_path = os.path.join(
             dest_path, geom_dir, os.path.basename(in_path))
-        subset_image(in_path, out_path, y1, y2, x1, x2)
+        subset_image(in_path, out_path, y1, y2, x1,
+                     x2, sample=inputs.sample_size)
 
     SLCs = glob.glob(os.path.join(base_path, 'SLC', '**/[!geo_]*.slc.full'))
     for slc in SLCs:

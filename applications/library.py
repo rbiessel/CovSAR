@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import uniform_filter, median_filter
 import isce
 import isceobj
 import isceobj.Image.IntImage as IntImage
@@ -12,6 +12,7 @@ from scipy import linalg
 from skimage.restoration import denoise_nl_means, estimate_sigma
 from sklearn.decomposition import PCA, FastICA
 from mpl_toolkits.mplot3d import Axes3D
+from lc_filter import filter as lc_filter
 import os
 import psutil
 
@@ -52,8 +53,18 @@ def eig_decomp(cov):
     return cov.reshape((shape[0], shape[1], shape[2]))
 
 
+def intensity_to_epsilon(intensities, scaling=0.046):
+    print(intensities.shape)
+    intensities /= scaling
+    intensities = intensities - intensities[:, :, 0, np.newaxis]
+
+    min = np.min(intensities, axis=2)
+    print(min.shape)
+    intensities += np.abs(min)[:, :, np.newaxis]
+    return intensities.astype(np.complex64) + 0j
+
+
 def compute_tc(cov, phi_est):
-    print('Computing TC')
     kappa = np.zeros(cov[0, 0].shape, dtype=np.complex64)
     N = phi_est.shape[2]
     for i in range(N):
@@ -65,7 +76,35 @@ def compute_tc(cov, phi_est):
 
 
 def get_intensity(cov):
-    return np.log(np.abs(np.diagonal(cov)))
+    return np.log10(np.abs(np.diagonal(cov)))
+
+
+def gen_lstq(x, y, C, function='linear'):
+    if function is 'linear':
+        G = np.stack([np.ones(x.shape[0]), x]).T
+    elif function is 'root3':
+        G = np.stack([np.ones(x.shape[0]), x, np.sign(x) * np.abs(x)**(1/3)]).T
+
+    # C = np.diag(np.diag(C))**(1/3)
+    C_inv = np.linalg.inv(C)
+    m = np.linalg.inv(G.T @ C_inv @ G) @ G.T @ C_inv @ y
+
+    return np.flip(m)  # np.concatenate([np.array([0]), m])
+
+
+def fit_cubic(x, y):
+    stack = np.stack([np.ones(x.shape[0]), x, np.sign(x) * np.abs(x)**(1/3)]).T
+    fit = np.linalg.lstsq(stack, y)
+    return fit[0]
+
+
+def intensity_closure(i1, i2, i3):
+    triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
+    return triplet * (i1 * i2 * i3)
+
+
+def phase_closure(phi12, phi23, phi13):
+    return phi12 * phi23 * phi13.conj()
 
 
 def get_closure_significance(triplet, triplet_variance):
@@ -85,7 +124,6 @@ def non_local_filter(image, sig):
 
 
 def non_local_complex(image, sig):
-    print('Performing Non Local Means denoising on an input image... ')
     return denoise_nl_means(
         image.real, h=0.8 * sig, sigma=sig, fast_mode=True) + 1j * denoise_nl_means(
             image.imag, h=0.8 * sig, sigma=sig, fast_mode=True)
@@ -268,7 +306,7 @@ def get_db_matrix(stack, sig=1, size=None, landcover=None):
     return db_dif
 
 
-def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=None, aspect=7, cov=False, sig=None):
+def interfere(stack, refi, seci, scaling=None, sample=None, show=True, ml=(1, 1), landcover=None, aspect=7, cov=False, sig=None):
     '''
         Generate a multilooked interferogram from two SLC images of the same dimension
     '''
@@ -284,10 +322,14 @@ def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=N
             scaling = np.sqrt(scale1 * scale2)
 
     interferogram = stack[refi] * stack[seci].conj()
+
+    small_window = interferogram[110:120, 100:120]
+
     if scaling is not 1:
         scaling[scaling == 0] = 1
         interferogram = interferogram / scaling
     # interferogram[np.isnan(interferogram)] = 0
+
     if ml[0] > 1 and ml[1] > 1:
         if landcover is not None:
             interferogram = landcover_filter(
@@ -296,6 +338,9 @@ def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=N
             interferogram = non_local_complex(interferogram, sig=sig)
         else:
             interferogram = multilook(interferogram, ml=(ml[0], ml[1]))
+
+    if sample is not None:
+        interferogram = interferogram[::sample[0], ::sample[1]]
 
     if show:
         fig, ax1 = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
@@ -315,50 +360,12 @@ def interfere(stack, refi, seci, scaling=None, show=True, ml=(1, 1), landcover=N
     return interferogram
 
 
-def cov2coh(cov):
-    coh = np.zeros(cov.shape)
-    for i in range(cov.shape[0]):
-        for j in range(cov.shape[1]):
-            print(i, j)
-            scal1 = np.abs(cov[i, i])
-            scal2 = np.abs(cov[j, j])
-            coh[i, j, :, :] = cov[i, j, :, :] / np.sqrt(scal1 * scal2)
-            plt.imshow(np.abs(coh[i, j]))
-            plt.show()
-    return coh
-
-
-def get_covariance(stack, ml='landcover', ml_size=(20, 4), landcover=None, coherence=False, sig=None):
-    print('current stack: ', stack.shape)
-    if landcover is not None:
-        print('Landcover size: ', landcover.shape)
-    slcn = stack.shape[0]
-    cov = np.zeros(
-        (slcn, slcn, stack.shape[1], stack.shape[2]), dtype=np.complex64)
-
-    scaling = 1
-    if coherence:
-        scaling = None
-
-    for i in range(slcn):
-        for j in range(slcn):
-            if j >= i:
-                cov[i, j, :, :] = interfere(
-                    stack, i, j, ml=ml_size, show=False, aspect=1, scaling=scaling, cov=True, landcover=landcover, sig=sig)
-            else:
-                cov[i, j, :, :] = cov[j, i, :, :].conj()
-
-    return cov
-
-
 def landcover_filter(image, landcover, size, get_count=False, stat='mean', real_only=False):
     '''
         Use a landcover based guassian filter to multilook a complex image.
     '''
-
-    print('Performing a landcover driven filter')
-
-    filtered_real, count = lc_filter(image.real, landcover, size, stat=stat)
+    filtered_real, count = lc_filter(
+        image.real, landcover, size, stat=stat, real=True)
 
     if get_count:
         return count
@@ -366,41 +373,12 @@ def landcover_filter(image, landcover, size, get_count=False, stat='mean', real_
     if real_only:
         return filtered_real
 
-    filtered_imag, count = lc_filter(image.imag, landcover, size, stat=stat)
+    filtered_imag, count = lc_filter(
+        image.imag, landcover, size, stat=stat, real=False)
 
     imf = filtered_real + 1j * filtered_imag
 
     return imf
-
-
-def calcClosure(stack, one, two, three, ml=(1, 1), show=True, landcover=None, aspect=7, sig=None):
-    '''
-        Generate phase closures from a stack of SLC images and three indexes
-    '''
-
-    phi12 = interfere(stack, one, two, show=False,
-                      ml=ml, landcover=landcover, sig=sig)
-    phi23 = interfere(stack, two, three, show=False,
-                      ml=ml, landcover=landcover, sig=sig)
-    phi13 = interfere(stack, one, three, show=False,
-                      ml=ml, landcover=landcover, sig=sig)
-    closure = phi12 * phi23 * phi13.conj()
-
-    if show:
-        fig, ax = plt.subplots()
-        ax.imshow(np.angle(closure), cmap=plt.cm.RdBu_r,
-                  vmin=-np.pi, vmax=np.pi)
-
-        if aspect is not None:
-            ax.set_aspect(aspect)
-
-        plt.title('Phase Closure')
-        plt.show()
-
-        # plt.imshow(10 * np.log(np.abs(closure)), cmap=plt.cm.gray)
-        # plt.show()
-
-    return closure
 
 
 def clone_isce(data, outfile):
