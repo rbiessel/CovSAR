@@ -79,17 +79,33 @@ def get_intensity(cov):
     return np.log10(np.abs(np.diagonal(cov)))
 
 
-def gen_lstq(x, y, C, function='linear'):
+def gen_lstq(x, y, W=None, C=None, function='linear'):
     if function is 'linear':
+        G = np.stack([x]).T
+    if function is 'lineari':
         G = np.stack([np.ones(x.shape[0]), x]).T
     elif function is 'root3':
-        G = np.stack([np.ones(x.shape[0]), x, np.sign(x) * np.abs(x)**(1/3)]).T
+        G = np.stack([x, np.sign(x) * np.abs(x)**(1/3)]).T
+    elif function is 'root5':
+        G = np.stack([x, np.sign(x) * np.abs(x)**(1/3),
+                      np.sign(x) * np.abs(x)**(1/5)]).T
 
-    # C = np.diag(np.diag(C))**(1/3)
-    C_inv = np.linalg.inv(C)
-    m = np.linalg.inv(G.T @ C_inv @ G) @ G.T @ C_inv @ y
+    print(f'Cond(G): {np.linalg.cond(G)}')
+    if C is not None:
+        C_inv = C
+    else:
+        C_inv = np.eye(G.shape[0])
 
-    return np.flip(m)  # np.concatenate([np.array([0]), m])
+    if W is not None:
+        Gw = W @ G
+        dw = W @ y
+        covm = np.linalg.inv(Gw.T @ Gw)
+        m = covm @ Gw.T @ dw
+    else:
+        m = np.linalg.inv(G.T @ C_inv @ G) @ G.T @ C_inv @ y
+        covm = None
+
+    return np.flip(m), covm
 
 
 def fit_cubic(x, y):
@@ -98,9 +114,23 @@ def fit_cubic(x, y):
     return fit[0]
 
 
+def fit_phase_ratio(iratio, nlphase, degree):
+    '''
+        Fit the non-linear phases to a function of the intensity ratio
+    '''
+    G = np.zeros((degree - 2, iratio.shape[0])).T
+    for i in range(degree - 2):
+        G[:, i] = np.array(iratio)**(i+2)
+
+    return np.flip(np.hstack(([0, 0], np.linalg.lstsq(G, nlphase)[0])))
+
+
 def intensity_closure(i1, i2, i3):
     triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
-    return triplet * (i1 * i2 * i3)
+    triplet = triplet * (i1 * i2 * i3)
+    return triplet
+    # return ((i2 - i1) + (i3 - i2) + (i1 - i3))
+    return np.sign(triplet) * (np.abs(triplet))**(1/3)
 
 
 def phase_closure(phi12, phi23, phi13):
@@ -138,131 +168,6 @@ def multilook(im, ml=(8, 2), thin=(8, 2)):
         uniform_filter(im.imag, size=ml)
     # imf = imf[::ml[0]//2, ::ml[1]//2].copy()[:outshape[0], :outshape[1]]
     return imf
-
-
-def remove_sm_phase_pcr(interferogram, delta_sm, closures=None):
-
-    delta_sm = delta_sm.real
-    if closures is None:
-        closures = np.zeros(interferogram.shape) + 0.01
-
-    closure_thresh = 0
-    closure_abs = np.abs(np.angle(closures))
-    og_shape = interferogram.shape
-
-    sm_mean = np.mean(delta_sm)
-    sm_std = np.std(delta_sm)
-
-    delta_sm = (delta_sm - sm_mean) / sm_std
-
-    int_mean = np.mean(interferogram)
-    int_std = np.std(interferogram)
-
-    interferogram = (interferogram - int_mean) / int_std
-
-    new_sm = delta_sm[closure_abs >= closure_thresh]
-    new_int = interferogram[closure_abs >= closure_thresh]
-
-    samples = np.array(
-        [new_sm.flatten(), new_int.real.flatten(), new_int.imag.flatten()]).T
-
-    data_all = np.array(
-        [delta_sm.flatten(), interferogram.real.flatten(), interferogram.imag.flatten()]).T
-
-    # data_all = samples
-    # print(samples.shape)
-    # samples = samples[np.random.choice(samples.shape[0], 6000, replace=True)]
-
-    pca = PCA(n_components=3)
-    pca.fit(samples)
-    transformed = pca.transform(data_all)
-    # transformed = transformed / np.std(transformed)
-
-    rng = np.random.RandomState(32)
-    ica = FastICA(random_state=rng).fit(samples)
-    # print(ica.mixing_)
-    # print('ICA FIT: ', ica.mixing_)
-    S_ica_ = ica.transform(data_all)
-
-    S_ica_ = S_ica_ / np.std(S_ica_)
-
-    V = pca.components_.T
-    V = ica.mixing_.T
-
-    # print('PCA vectors: ', V)
-    V = V / np.linalg.norm(V)
-    # print(transformed)
-    y = np.dot(data_all, V[0])
-    y2 = np.dot(data_all, V[1])
-    fig, axes = plt.subplots(1, 2, figsize=(10, 3))
-
-    # axes[0].scatter(data_all[:, 0],
-    #                 np.angle((data_all[:, 1] + 1j * data_all[:, 2])).flatten(), alpha=.3, label='samples', s=2)
-    # axes[0].set(xlabel='Original Samples', ylabel='y')
-    # axes[1].scatter(S_ica_[:, 0], np.angle(
-    #     (S_ica_[:, 1] + 1j * S_ica_[:, 2])).flatten(), alpha=.3, s=2)
-    # axes[1].set(xlabel='corrected', ylabel='y')
-
-    # plt.tight_layout()
-    # plt.show()
-
-    corrected = S_ica_[:, 1] + (S_ica_[:, 2] * 1j)
-    corrected = (corrected * int_std) + int_mean
-
-    # print(f'Og Shape: {og_shape}, Corrected Shape: ', corrected.shape)
-
-    # interferogram = (np.ones(og_shape) + (np.zeros(og_shape) * 1j)).flatten()
-    # closures = closures.flatten()
-
-    # interferogram[closures > closure_thresh] = corrected
-
-    # interferogram = np.reshape(interferogram, og_shape)
-
-    return np.reshape(corrected, og_shape)
-
-
-def remove_sm_phase_pca(interferogram, delta_sm):
-
-    # Convert to  columns: [sm, interferogram]
-    og_shape = interferogram.shape
-
-    delta_sm = (delta_sm - np.mean(delta_sm)) / np.std(delta_sm)
-
-    int_mean = np.mean(interferogram)
-    int_std = np.std(interferogram)
-
-    interferogram = (interferogram - int_mean) / int_std
-
-    samples = np.array(
-        [delta_sm.flatten(), interferogram.flatten()]).T
-
-    data = samples
-    print(samples.shape)
-    # samples = samples[np.random.choice(samples.shape[0], 6000, replace=True)]
-
-    pca = PCA(n_components=2)
-    pca.fit(samples)
-    V = pca.components_.T
-
-    print(V)
-
-    y = np.dot(data, V[0])
-    y2 = np.dot(data, V[1])
-
-    fig, axes = plt.subplots(1, 3, figsize=(10, 3))
-
-    axes[0].scatter(data[:, 0],
-                    data[:, 1], alpha=.3, label='samples', s=2)
-    axes[0].set(xlabel='Original Samples', ylabel='y')
-    axes[1].scatter(data[:, 0], y, alpha=.3, s=2)
-    axes[1].set(xlabel='Projected data onto first PCA component', ylabel='y')
-    axes[2].scatter(data[:, 0], y2, alpha=.3, s=2)
-    axes[2].set(
-        xlabel='Projected data onto second PCA component', ylabel='y')
-    plt.tight_layout()
-    plt.show()
-
-    return (np.dot(data, V[1]).reshape(og_shape) * int_std) + int_mean
 
 
 def get_db_matrix(stack, sig=1, size=None, landcover=None):
@@ -322,8 +227,6 @@ def interfere(stack, refi, seci, scaling=None, sample=None, show=True, ml=(1, 1)
             scaling = np.sqrt(scale1 * scale2)
 
     interferogram = stack[refi] * stack[seci].conj()
-
-    small_window = interferogram[110:120, 100:120]
 
     if scaling is not 1:
         scaling[scaling == 0] = 1

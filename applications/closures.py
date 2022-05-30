@@ -9,6 +9,25 @@ from scipy.stats import chi2
 from matplotlib import pyplot as plt
 
 
+def eval_sytstematic_closure(amptriplets, model, form='linear'):
+    '''
+        Evaluate amplitude triplets based on model parameters in either a linear or cubic root form
+    '''
+    if form is 'linear':
+        est_closures = model[0] * amptriplets.flatten()
+    if form is 'lineari':
+        est_closures = model[0] * amptriplets.flatten() + model[1]
+    elif form is 'root3':
+        est_closures = model[0] * np.sign(amptriplets) * np.abs(
+            amptriplets.flatten())**(1/3) + model[1] * amptriplets.flatten()
+    elif form is 'root5':
+        est_closures = model[0] * np.sign(amptriplets) * np.abs(
+            amptriplets.flatten())**(1/5) + model[1] * np.sign(amptriplets) * np.abs(
+            amptriplets.flatten())**(1/3) + model[2] * amptriplets.flatten()
+
+    return est_closures
+
+
 def get_adjacent_triplets(num):
     '''
         Return an array of indexes corresponding only to triplets immediately adjacent to each other
@@ -17,16 +36,17 @@ def get_adjacent_triplets(num):
     for i in range(num - 2):
         triplets.append([i, i+1, i + 2])
 
-    print(np.sort(np.array(triplets)))
     return np.sort(np.array(triplets))
 
 
-def get_triplets(num, force=None):
+def get_triplets(num, force=None, all=False):
     '''
         Get the indexes of a unique set of combinations of the SLCs
     '''
     numbers = np.arange(0, num, 1)
     permutations = np.array(list(itertools.permutations(numbers, 3)))
+    if all:
+        return permutations
     combinations = np.sort(permutations, axis=1)
     combinations = np.unique(combinations, axis=0)
     if force is not None:
@@ -55,15 +75,15 @@ def build_A(triplets, coherence):
     return A, rank
 
 
-def get_triplet_covariance(cov, A, n):
+def get_triplet_covariance(cov, A, n, diagonal=False):
     '''
         Get the covariance between phase closures/triplets
     '''
-    phi_cov, indexes = get_phase_covariance(
-        cov, count=(n**2))  # dont hard-code the sample size
+    phi_cov, indexes = get_phase_covariance(cov, count=n)
     phi_cov = np.swapaxes(phi_cov, 0, 2)
     phi_cov = np.swapaxes(phi_cov, 1, 3)
     triplet_covariance = A @ phi_cov @ A.T
+
     return triplet_covariance, indexes, A
 
 

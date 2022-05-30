@@ -53,7 +53,16 @@ class SMForward:
     def I_dezan(self, sm):
         eps1 = self.sm2eps(sm)
         k1 = self.k_prime(eps1)
-        return 1/((2j * k1) - (2j * k1.conj()))
+        return np.abs(1/((2j * k1) - (2j * k1.conj())))**2
+
+    def fresnels(self, sm, theta=np.radians(45)):
+        '''
+            Compute reflection coefficient according to some sm
+        '''
+
+        epsT = self.sm2eps(sm).real
+        epsI = 1
+        return np.cos(theta) * ((epsT - epsI) / (epsT + epsI))
 
     def reflected_I(self, sm, theta):
         n1 = 1
@@ -62,10 +71,20 @@ class SMForward:
         beta = eps/n1
         return (alpha - beta) / (alpha + beta)
 
-    def dubois_I_dif(self, sm1, sm2, theta=10):
+    def dubois_I_ratio(self, sm1, sm2, theta=10, log=False):
+        ''''
+            Returns the expected ratio of intensity1/intensity2 corresponding to a change in dielectric constant
+
+        '''
+
         eps1 = self.mv2eps_real(sm1)
         eps2 = self.mv2eps_real(sm2)
-        return np.tan(np.radians(theta)) * (eps2 - eps1)
+
+        ratio = 10**(eps1)/10**(eps2)
+        if log:
+            return np.log10(ratio)
+        else:
+            return ratio
 
     def get_phases_dezan(self, ref, sec, use_epsilon=False):
         '''
