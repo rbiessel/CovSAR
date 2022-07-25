@@ -33,8 +33,8 @@ class SMForward:
 
     def plot_dielectric(self):
 
-        plt.plot(self.mvs, self.de_real, label='Real Part')
-        plt.plot(self.mvs, self.de_imag, label='imaginary part')
+        plt.scatter(self.mvs, self.de_real, label='Real Part')
+        plt.scatter(self.mvs, self.de_imag, label='imaginary part')
         plt.legend(loc='lower left')
         plt.show()
 
@@ -59,7 +59,6 @@ class SMForward:
         '''
             Compute reflection coefficient according to some sm
         '''
-
         epsT = self.sm2eps(sm).real
         epsI = 1
         return np.cos(theta) * ((epsT - epsI) / (epsT + epsI))

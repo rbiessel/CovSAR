@@ -3,12 +3,22 @@ import closures
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import special
+from interpolate_phase import interpolate_phase_intensity
 
-
-dezan = SMForward(imag_slope=1/10, r_A=0.05, r_B=0.1, r_C=4)
+dezan = SMForward(imag_slope=0.1, r_A=0.02, r_B=0.01, r_C=4)
 
 
 def sm_to_phase_sqrt(sm):
+    '''
+      Convert an array of volumetric soil moistures to angles according to a square root function.
+      Soil moistures betwen 0 and 50 will return angles in the range [0, pi/2] in the form of a complex array
+    '''
+    sign = np.sign(sm)
+    angle = (np.sqrt(2) * np.pi)**-1 * np.sqrt(np.abs(sm))
+    return np.exp(1j * sign * angle)
+
+
+def sm_to_phase_logistic(sm):
     '''
       Convert an array of volumetric soil moistures to angles according to a square root function.
       Soil moistures betwen 0 and 50 will return angles in the range [0, pi/2] in the form of a complex array
@@ -109,7 +119,7 @@ def main():
     n = 10
     deformation = np.exp(1j * np.linspace(0, 2, n))
 
-    sm = np.abs(np.linspace(20, 40, n) + (np.random.rand(n) * 1))
+    sm = np.abs(np.linspace(10, 60, n) + (np.random.rand(n) * 2))
     # sm[3] = sm[4]
     # sm[7] = sm[5]
     sm_difs = closures.coherence_to_phivec(sm_to_matrix(sm))
@@ -120,7 +130,7 @@ def main():
     noise_coh = build_noise_coherence(n, sigma)
 
     dezan.set_moistures(sm)
-    # dezan.plot_dielectric()
+    dezan.plot_dielectric()
 
     nl_coh_dezan = build_nl_coherence_dezan(sm, dezan).conj()
 
@@ -155,6 +165,9 @@ def main():
     inverted_phases_sqrt = np.exp(
         1j * A_dagger @ (np.angle(observed_closures_sqrt)))
 
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+
     fig, ax = plt.subplots(nrows=2, ncols=2)
     ax[0, 0].imshow(np.angle(nl_coh_dezan), vmin=vmin,
                     vmax=vmax, cmap=plt.cm.seismic)
@@ -173,20 +186,23 @@ def main():
 
     print('Null Space: ', null_space)
 
-    plt.scatter(sm_difs, np.angle(inverted_phases_dezn), marker='o', color='blue',
+    plt.scatter(sm_difs, np.angle(inverted_phases_dezn), marker='o', color=colors[0],
                 label='De Zan Observed')
     plt.scatter(sm_difs, np.angle(
-        closures.coherence_to_phivec(nl_coh_dezan)), marker='x', color='blue', label='De Zan Expected')
+        closures.coherence_to_phivec(nl_coh_dezan)), marker='x', color=colors[0], label='De Zan Expected')
 
     plt.scatter(sm_difs, np.angle(inverted_phases_sqrt),
-                marker='o', color='red', label='Sqrt observed')
+                marker='o', color=colors[1], label='Sqrt observed')
     plt.scatter(sm_difs, np.angle(closures.coherence_to_phivec(
-        nl_coh_sqrt)), marker='x', color='red', label='Sqrt Expected')
+        nl_coh_sqrt)), marker='x', color=colors[1], label='Sqrt Expected')
 
-    plt.xlabel('sm difference')
-    plt.ylabel('Estimated Angle')
+    plt.xlabel('SM difference')
+    plt.ylabel('Estimated Angle (rad)')
     plt.legend(loc='lower left')
     plt.show()
+
+    gradient_dezan = interpolate_phase_intensity(sm, nl_coh_dezan, plot=True)
+    # gradient_sqrt = interpolate_phase_intensity(sm, nl_coh_sqrt, plot=False)
 
     residual_dezan_ln = closures.coherence_to_phivec(
         nl_coh_dezan) * inverted_phases_dezn.conj()
@@ -196,59 +212,28 @@ def main():
 
     plotn = 6
 
-    fig = plt.figure()
+    residual_dezan = np.angle(residual_dezan_ln)
 
-    for i in range(6):
+    residual_sqrt = np.angle(residual_sqrt_ln)
 
-        # PLOT RESIDUALS
+    # plt.scatter(sm_difs, np.angle(inverted_phases_dezn))
+    # plt.scatter(sm_difs, np.angle(closures.coherence_to_phivec(
+    #     nl_coh_dezan)))
 
-        # fig, ax = plt.subplots(nrows=1, ncols=2)
-        # ax[0].imshow(np.angle(
-        #     nl_coh_dezan * closures.phivec_to_coherence(inverted_phases_dezn, n).conj()), vmin=vmin, vmax=vmax)
-        # ax[0].set_title('Phases De Zan Residual')
-        # ax[1].imshow(np.angle(
-        #     nl_coh_sqrt * closures.phivec_to_coherence(inverted_phases_sqrt, n).conj()), vmin=vmin, vmax=vmax)
-        # ax[1].set_title('Phases Sqrt Residual')
-        # plt.show()
+    # plt.show()
 
-        # Do residuals show a systematic relationship to the root soil moisture?
-
-        # plt.plot(sm)
-        # plt.show()
-        # plt.imshow(sm_to_matrix(sm))
-        # plt.show()
-        plt.subplot(int(f'23{i+1}'))
-
-        print(null_space.shape)
-
-        random_coeff = np.random.random(
-            null_space.shape[0]) * 1 * (i + 0)
-
-        null_vector = np.exp(1j * (null_space.T @ random_coeff))
-
-        norm = np.linalg.norm((null_space.T @ random_coeff), 2)
-
-        residual_dezan = np.angle(residual_dezan_ln * null_vector)
-
-        residual_sqrt = np.angle(residual_sqrt_ln * null_vector)
-
-        # plt.scatter(sm_difs, np.angle(inverted_phases_dezn))
-        # plt.scatter(sm_difs, np.angle(closures.coherence_to_phivec(
-        #     nl_coh_dezan)))
-
-        # plt.show()
-
-        plt.scatter(sm_difs, residual_dezan,
-                    label=f'N(A) vector norm: {np.round(norm, 2)}')
-        # plt.scatter(sm_difs, residual_sqrt,
-        #             label='Residual Sqrt (rad), sigma = 0.2 rad')
-        # plt.plot(sm_difs, np.polyval(
-        #     np.polyfit(sm_difs, residual_dezan, 1), sm_difs), '--')
-        # plt.plot(sm_difs, np.polyval(
-        #     np.polyfit(sm_difs, residual_sqrt, 1), sm_difs), '--')
-        plt.legend(loc='upper left')
-        plt.xlabel('SM Difference')
-        plt.ylabel('Least Norm Residual')
+    plt.scatter(sm_difs, residual_dezan, label='residual De Zan')
+    plt.scatter(sm_difs, -2 * sm_difs * gradient_dezan,
+                label='Gradient De Zan')
+    # plt.scatter(sm_difs, residual_sqrt,
+    #             label='Residual Sqrt (rad), sigma = 0.2 rad')
+    # plt.plot(sm_difs, np.polyval(
+    #     np.polyfit(sm_difs, residual_dezan, 1), sm_difs), '--')
+    # plt.plot(sm_difs, np.polyval(
+    #     np.polyfit(sm_difs, residual_sqrt, 1), sm_difs), '--')
+    plt.legend(loc='upper left')
+    plt.xlabel('SM Difference')
+    plt.ylabel('Least Norm Residual')
     plt.show()
 
 

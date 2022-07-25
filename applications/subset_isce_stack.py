@@ -111,6 +111,10 @@ def main():
         corner1 = np.abs((lat - inputs.lat[0]) * (lon - inputs.lon[0]))
         corner2 = np.abs((lat - inputs.lat[1]) * (lon - inputs.lon[1]))
 
+        plt.imshow(corner1)
+        plt.show()
+        plt.imshow(corner2)
+        plt.show()
         index1 = np.unravel_index(
             np.argmin(corner1), (corner1.shape[0], corner1.shape[1]))
         index2 = np.unravel_index(
@@ -119,8 +123,8 @@ def main():
         print(index1[1], index1[0])
         print(index2[1], index2[0])
 
-        y1 = index2[0]
-        y2 = index1[0]
+        y1 = index1[0]
+        y2 = index2[0]
 
         corner1 = np.abs((lat - inputs.lat[0]) * (lon - inputs.lon[1]))
         corner2 = np.abs((lat - inputs.lat[1]) * (lon - inputs.lon[0]))
@@ -130,8 +134,13 @@ def main():
         index2 = np.unravel_index(
             np.argmin(corner2), (corner2.shape[0], corner2.shape[1]))
 
-        x1 = index1[1]
-        x2 = index2[1]
+        print(index1[1], index1[0])
+        print(index2[1], index2[0])
+
+        # y1 = index1[0]
+        # y2 = index2[0]
+        x2 = index1[1]
+        x1 = index2[1]
 
     elif (inputs.rows is not None and inputs.cols is not None):
         x1, x2 = inputs.rows
@@ -159,4 +168,5 @@ def main():
         subset_image(slc, out_path, y1, y2, x1, x2)
 
 
-main()
+if __name__ == "__main__":
+    main()

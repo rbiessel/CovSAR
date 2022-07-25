@@ -1,3 +1,4 @@
+from random import sample
 from numpy.core.arrayprint import _leading_trailing
 from numpy.lib.polynomial import polyval
 import rasterio
@@ -13,6 +14,7 @@ from covariance import CovarianceMatrix
 import isceio as io
 import closures
 import scipy.stats as stats
+from subset_isce_stack import subset_image
 
 
 def readInputs():
@@ -28,7 +30,7 @@ def readInputs():
     return args
 
 
-def write_timeseries(phi_hist_eig, dates, kappa, outputs):
+def write_timeseries(phi_hist_eig, dates, kappa, outputs, intensity=None, geocode=None):
 
     # Check if output folder exists already
     if os.path.exists(os.path.join(os.getcwd(), outputs)):
@@ -41,23 +43,38 @@ def write_timeseries(phi_hist_eig, dates, kappa, outputs):
     # Write out nearest neighbor pairs
     for i in range(1, phi_hist_eig.shape[2]):
         phi = phi_hist_eig[:, :, i] * phi_hist_eig[:, :, i - 1].conj()
-        # db = intensity[:, :, i] - intensity[:, :, i - 1]
         date_str = dates[i]
         ref_date = dates[i - 1]
         date_str = f'{ref_date}_{date_str}'
         os.mkdir(os.path.join(os.getcwd(), outputs, f'{date_str}'))
         int_path = os.path.join(os.getcwd(), outputs,
                                 date_str, f'{date_str}_wrapped.int')
-
-        intensity_path = os.path.join(os.getcwd(), outputs,
-                                      date_str, f'{date_str}_db.int')
-
-        io.write_image(int_path, np.angle(phi))
-        # io.write_image(intensity_path, db)
+        io.write_image(int_path, np.angle(phi), geocode=geocode)
+        if intensity is not None:
+            db = intensity[:, :, i] - intensity[:, :, i - 1]
+            intensity_path = os.path.join(os.getcwd(), outputs,
+                                          date_str, f'{date_str}_db.int')
+            io.write_image(intensity_path, db, geocode=geocode)
 
     kappa_path = os.path.join(os.getcwd(), outputs,
                               './temporal_coherence.int')
-    io.write_image(kappa_path, np.abs(kappa))
+    io.write_image(kappa_path, np.abs(kappa), geocode=geocode)
+
+
+def write_geometry(geom_path, outputs, sample_size):
+    if os.path.exists(os.path.join(os.getcwd(), outputs)):
+        print('Output folder already exists, clearing it')
+        shutil.rmtree(os.path.join(os.getcwd(), outputs))
+
+    print('creating output geometry folder')
+    os.mkdir(os.path.join(os.getcwd(), outputs))
+
+    files = ['lat', 'lon', 'hgt', 'incLocal', 'shadowMask', 'los']
+
+    for file in files:
+        path = os.path.join(geom_path, f'{file}.rdr.full')
+        outpath = os.path.join(outputs, f'{file}.rdr.full')
+        subset_image(path, outpath, 0, -1, 0, -1, sample=sample_size)
 
 
 def main():

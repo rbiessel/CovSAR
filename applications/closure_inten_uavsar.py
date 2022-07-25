@@ -1,8 +1,5 @@
 from cgitb import small
 from distutils.log import error
-from email.errors import FirstHeaderLineIsContinuationDefect
-from operator import index
-from turtle import width
 from numpy.core.arrayprint import _leading_trailing
 from numpy.lib.polynomial import polyval
 import rasterio
@@ -25,7 +22,6 @@ from sklearn.linear_model import HuberRegressor, Ridge
 from pl.nn import nearest_neighbor
 from interpolate_phase import interpolate_phase_intensity
 from scipy.stats import gaussian_kde
-from scipy import optimize
 from greg import linking as MLE
 
 
@@ -38,6 +34,7 @@ def readInputs():
     parser.add_argument('-o', '--output', type=str,
                         dest='output', required=True, help='Output folder to save timeseries to')
     args = parser.parse_args()
+
     return args
 
 
@@ -48,30 +45,34 @@ def main():
     outputs = inputs.output
     files = glob.glob(stack_path)
     files = sorted(files)
-    files = files[1:7]
+    files = files[0:10]
     dates = []
     for file in files:
-        date = file.split('/')[-2]
+        date = file.split('/')[-1].split('_')[-6]
         dates.append(date)
 
+    # clone = None
     if inputs.landcover:
         landcover = np.squeeze(rasterio.open(inputs.landcover).read())
+        print('landcover:')
         print(landcover.shape)
 
-    geom_path = os.path.join(os.path.dirname(
-        files[0]), '../../geom_reference/')
-
-    assert os.path.exists(geom_path)
-
-    SLCs = io.load_stack_vrt(files)
+    cols = 4900
+    rows = 4750
+    SLCs = io.load_stack_uavsar(files, rows=rows, cols=cols)
 
     n = 19
-    lf = 4
-    ml_size = (7*lf, 19*lf)
+    # 7 x 19
+    # cov = CovarianceMatrix(SLCs, ml_size=(7, 19))
+    # cov = CovarianceMatrix(SLCs, ml_size=(7, 19), sample=(2, 5))
+    lf = 2
+    ml_size = (8*lf, 4*lf)
+    # ml_size = (1)
     n = ml_size[0] * ml_size[1]
-    sample_size = (2 * lf, 5*lf)
-    cov = CovarianceMatrix(SLCs, ml_size=ml_size,
-                           sample=sample_size)
+    sample = (4 * lf, 2 * lf)
+
+    cov = CovarianceMatrix(SLCs, ml_size=ml_size, sample=sample)
+    # cov = CovarianceMatrix(SLCs, ml_size=ml_size, sample=(2, 5))
 
     SLCs = None
 
@@ -81,16 +82,31 @@ def main():
 
     k = special.comb(coherence.shape[0] - 1, 2)
     triplets = closures.get_triplets(coherence.shape[0], all=False)
+    # variances = np.var(triplets, axis=1)
+    # print('variances: ', variances)
+    # triplets = triplets[np.argsort(np.var(triplets, axis=1))]
     # triplets = triplets[0:int(k)]
 
-    baslines_a = np.floor(np.array([(triplet[2] - triplet[0])
-                                    for triplet in triplets]) * 12)
+    triplets_permuted_1 = [[triplet[0], triplet[2], triplet[1]]
+                           for triplet in triplets]
 
-    baslines_b = np.array([triplet[2] - triplet[1]
-                           for triplet in triplets]) * 12
+    # triplets = np.concatenate(
+    #     (triplets, triplets_permuted_1))
+
+    # k *= 2
+
+    print('Triplets: ', triplets)
 
     A, rank = closures.build_A(triplets, coherence)
+
+    # closure_cov = closures.get_triplet_covariance(
+    #     cov.cov, A, n)[0]
+
+    # print('Closure covariance shape: ', closure_cov.shape)
     U, S, Vh = np.linalg.svd(A)
+    print(S)
+    print(A)
+    print(np.diag(1/S[:rank]))
     A_dagger = Vh[:rank].T @ np.diag(1/S[:rank]) @ U.T[:rank]
 
     if not inputs.landcover:
@@ -102,56 +118,39 @@ def main():
     landcover_types = np.unique(landcover)
 
     amp_triplet_stack = closure_stack.copy()
-    amp_triplet_stack = amp_triplet_stack.astype(np.float64)
-    amp_triplet_stack_legacy = amp_triplet_stack.copy()
 
-    amp_difference_stack = np.zeros(
-        (len(triplets), 3, coherence.shape[2], coherence.shape[3]))
+    amp_triplet_stack = amp_triplet_stack.astype(np.float64)
+
     for i in range(len(triplets)):
         triplet = triplets[i]
         closure = coherence[triplet[0], triplet[1]] * coherence[triplet[1],
                                                                 triplet[2]] * coherence[triplet[0], triplet[2]].conj()
 
-        clml = (8, 8)
+        clml = (4, 4)
         closure = sarlab.multilook(closure, ml=clml)
 
         # mean_coherence = (np.abs(coherence[triplet[0], triplet[1]]) + np.abs(
         #     coherence[triplet[1], triplet[2]]) + np.abs(coherence[triplet[0], triplet[2]].conj())) / 3
 
         amp_triplet = sarlab.intensity_closure(
-            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=True, cubic=False, filter=2)
-
-        amp_triplet_legacy = sarlab.intensity_closure(
-            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=False, cubic=False, legacy=True)
-
-        deltaI1 = sarlab.logistic(
-            intensity[:, :, triplet[1]] - intensity[:, :, triplet[0]])
-        deltaI2 = sarlab.logistic(
-            intensity[:, :, triplet[2]] - intensity[:, :, triplet[1]])
-        deltaI3 = sarlab.logistic(
-            intensity[:, :, triplet[0]] - intensity[:, :, triplet[2]])
-
-        amp_difference_stack[i, :, :, :] = np.array(
-            [deltaI1, deltaI2, deltaI3])
+            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=True, legacy=False, filter=4)
 
         # fig, ax = plt.subplots(ncols=2, nrows=1, sharex=True, sharey=True)
         # ax[0].imshow(np.angle(closure), vmin=-np.pi/2,
         #              vmax=np.pi/2, cmap=plt.cm.seismic)
-        # ax[1].imshow(np.sign(amp_triplet) *
-        #              np.log10(np.abs(amp_triplet)), cmap=plt.cm.seismic)
+
+        # vmin = 0 - np.std(amp_triplet)
+        # ax[1].imshow(amp_triplet, cmap=plt.cm.seismic,
+        #              vmin=vmin, vmax=(-1 * vmin))
         # plt.show()
         closure_stack[i] = closure
         amp_triplet_stack[i] = amp_triplet
-        amp_triplet_stack_legacy[i] = amp_triplet_legacy
 
     closure_stack[np.isnan(closure_stack)] = 0
     amp_triplet_stack[np.isnan(amp_triplet_stack)] = 0
 
     rs = np.zeros(landcover.shape)
-    rs_legacy = np.zeros(landcover.shape)
-
     ps = np.zeros(landcover.shape)
-    ps_legacy = np.zeros(landcover.shape)
 
     degree = 1
     power = 1
@@ -167,7 +166,7 @@ def main():
                 intensities = intensity[j, i, :]
                 raw_intensities = intensities
                 intensities = np.tile(intensities, (len(intensities), 1))
-                intensities = intensities.T - intensities
+                intensities = -1 * (intensities.T - intensities)
 
                 ws = 0
                 window_closure = closure_stack[:, j-ws:j+ws+1, i-ws:i+ws+1]
@@ -177,22 +176,18 @@ def main():
                 window_amps = amp_triplet_stack[:,
                                                 j-ws:j+ws+1, i-ws:i+ws+1]  # [mask]
 
-                window_amps_legacy = amp_triplet_stack_legacy[:,
-                                                              j-ws:j+ws+1, i-ws:i+ws+1]
-
                 if len(window_amps.flatten()) > 2 and len(window_closure.flatten()) > 2:
                     r, p = stats.pearsonr(
                         np.angle(window_closure).flatten(), window_amps.flatten())
+                    # other_C = closure_cov[j, i, :, :]
+                    # # print(other_C.shape)
+                    # diag = np.diag(other_C)
+                    # W = (1/np.sqrt(diag))
+                    # alphas = np.abs(np.log10(W))
+                    # alphas = alphas/alphas.max()
+                    # W = np.diag(W)
 
-                    r = r**2
-                    n = len(np.angle(window_closure).flatten())
-                    r = 1 - (1 - r) * ((n - 1)/(n-2))
-
-                    r_legacy, p_legacy = stats.pearsonr(
-                        np.angle(window_closure).flatten(), window_amps_legacy.flatten())
-
-                    r_legacy = r_legacy**2
-
+                    # other_C = np.diag(diag)
                     fitform = 'linear'
 
                     coeff, covm = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
@@ -200,6 +195,7 @@ def main():
 
                     coeff_i, covm2 = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
                     ), C=None, W=None, function='lineari')
+                    # nt = window_amps.shape[0]
 
                     do_huber = False
 
@@ -207,9 +203,6 @@ def main():
 
                     rs[j, i] = r
                     ps[j, i] = p
-
-                    rs_legacy[j, i] = r_legacy
-                    ps_legacy[j, i] = p_legacy
 
                     # modeled systematic closures
                     if np.abs(r) >= 0:
@@ -242,7 +235,7 @@ def main():
 
                         gradient = 0
                         linear_phase = np.exp(
-                            1j * (-2 * intensities * gradient))
+                            1j * (2 * intensities * gradient))
 
                         error_coh = error_coh * linear_phase
 
@@ -251,28 +244,28 @@ def main():
 
                         # coherence[:, :, j, i] = error_coh
 
-                    if np.abs(r) > 0.99:
-                        # gradient = interpolate_phase_intensity(
-                        #     raw_intensities, error_coh, plot=True)
-                        # gradient = interpolate_phase_intensity(
-                        #     raw_intensities, error_coh_int, plot=True)
+                    if np.abs(r) > 1 and coeff_i[1] > 0.05:
+                        gradient = interpolate_phase_intensity(
+                            raw_intensities, error_coh, plot=True)
+                        gradient = interpolate_phase_intensity(
+                            raw_intensities, error_coh_int, plot=True)
 
-                        # fig = plt.figure()
-                        # ax = fig.add_subplot(111, projection='3d')
+                        fig = plt.figure()
+                        ax = fig.add_subplot(111, projection='3d')
 
-                        # # print(triplets.shape)
-                        # # print(sm[triplets[:, 0]])
+                        # print(triplets.shape)
+                        # print(sm[triplets[:, 0]])
 
                         # x = amp_difference_stack[:, 0, j, i]
                         # y = amp_difference_stack[:, 1, j, i]
                         # z = amp_difference_stack[:, 2, j, i]
-                        # # c = closures.eval_sytstematic_closure(
-                        # #     amp_triplets.flatten(), coeff, form='linear')
-                        # c2 = np.angle(window_closure).flatten()
+                        # c = closures.eval_sytstematic_closure(
+                        #     amp_triplets.flatten(), coeff, form='linear')
+                        c2 = np.angle(window_closure).flatten()
 
-                        # maxc = np.abs(np.max(c2))
+                        maxc = np.abs(np.max(c2))
 
-                        # # img = ax.scatter(x, y, z, c=c, cmap=plt.cm.seismic, vmin=-maxc, vmax=maxc)
+                        # img = ax.scatter(x, y, z, c=c, cmap=plt.cm.seismic, vmin=-maxc, vmax=maxc)
                         # img = ax.scatter(
                         #     x, y, z, c=c2, cmap=plt.cm.seismic, vmin=-maxc, vmax=maxc)
 
@@ -280,7 +273,7 @@ def main():
                         # plt.show()
 
                         fig, ax = plt.subplots(
-                            nrows=3, ncols=1, figsize=(5, 5))
+                            nrows=2, ncols=1, figsize=(5, 5))
                         # slope_stderr = np.sqrt(covm[0][0])
                         # intercept_stderr = np.sqrt(covm[1][1])
 
@@ -300,9 +293,6 @@ def main():
                         ax[0].plot(x, closures.eval_sytstematic_closure(
                             x, coeff_i, form='lineari'), '--', label='Closure Fit w/ intercept')
 
-                        # ax[0].plot(x, sarlab.gen_logistic(x, logistic_params[0], logistic_params[1],
-                        #                                   logistic_params[2]), '--', label='Closure Fit w/ intercept')
-
                         # conf95_slope = 1.96 * slope_stderr
                         # conf95_intercept = 1.96 * intercept_stderr
 
@@ -319,11 +309,11 @@ def main():
                         ax[0].set_title(f'r: {np.round(r, 3)}')
                         ax[0].set_ylabel('Closure Phase (rad)')
                         ax[0].set_xlabel(
-                            'Intensity Ratio Triple Product (dB^3)')
+                            'Intensity Metric')
                         ax[0].legend(bbox_to_anchor=(1.05, 0.5),
                                      loc='center left', borderaxespad=0.)
 
-                        ax[1].set_xlabel('Intensity Ratio (dB)')
+                        ax[1].set_xlabel('Intensity Metric')
                         ax[1].set_ylabel('Estimated Phase Error (rad)')
 
                         iratios = closures.coherence_to_phivec(intensities)
@@ -378,42 +368,10 @@ def main():
                         ax[1].legend(bbox_to_anchor=(1.05, 0.5),
                                      loc='center left', borderaxespad=0.)
 
-                        residual_closure = np.angle(window_closure).flatten() - closures.eval_sytstematic_closure(
-                            window_amps.flatten(), coeff_i, form='lineari')
-
-                        indexsort = np.argsort(baslines_a)
-                        residual_closure = residual_closure[indexsort]
-                        baslines_a = baslines_a[indexsort]
-
-                        u, s = np.unique(baslines_a, return_index=True)
-                        split_residuals_a = np.split(residual_closure, s[1:])
-
-                        print(u)
-
-                        u, s = np.unique(baslines_b, return_index=True)
-                        split_residuals_b = np.split(residual_closure, s[1:])
-
-                        # ax[2].scatter(
-                        #     baslines_a, residual_closure, s=10, label='a')
-                        ax[2].boxplot(split_residuals_a,
-                                      positions=u, widths=9)
-                        # ax[2].boxplot(split_residuals_b)
-
-                        # ax[2].scatter(
-                        #     baslines_b, residual_closure, s=10, label='b', alpha=0.5)
-                        ax[2].set_xlabel('basline')
-                        ax[2].set_ylabel('Closures')
-                        ax[2].legend(loc='lower right')
-
                         plt.tight_layout()
                         plt.show()
 
-                        fig, ax = plt.subplots(ncols=2, nrows=1)
-                        ax[0].hist(np.angle(window_closure).flatten(), bins=50)
-                        # ax[0].set_title()
-                        ax[1].hist(window_amps.flatten(), bins=50)
-                        ax[1].set_title('Amp Triplet')
-
+                        plt.hist(np.angle(window_closure).flatten(), bins=50)
                         plt.show()
 
                         fig, ax = plt.subplots(nrows=1, ncols=2)
@@ -449,22 +407,30 @@ def main():
                 print(
                     f'Phase Closure Correction Progress: {(j/amp_triplet_stack.shape[1]* 100)}%')
 
-    # fig, ax = plt.subplots(nrows=1, ncols=2)
-    # ax[0].hist(ps_legacy.flatten(), alpha=0.5, bins=100,
-    #            label='P Values - Triple product')
-    # ax[1].hist(np.abs(rs_legacy).flatten(), alpha=0.5, bins=100,
-    #            label='|Correlations| - triple product')
+    plt.hist(ps.flatten(), alpha=0.9, bins=100, label='P Values')
+    plt.hist(np.abs(rs).flatten(), alpha=0.5, bins=100, label='|Correlations|')
 
-    # ax[0].hist(ps.flatten(), alpha=0.5, bins=100,
-    #            label='P Values - Linear')
-    # ax[1].hist(np.abs(rs).flatten(), alpha=0.5, bins=100,
-    #            label='|Correlations| - Linear')
+    plt.legend(loc='upper right')
+    plt.ylabel('Pixels')
+    plt.show()
 
-    # ax[0].legend(loc='upper right')
-    # ax[1].legend(loc='upper right')
+    print('Poly shape:')
+    fig, ax = plt.subplots(ncols=(4), nrows=1,
+                           sharex=True, sharey=True)
+    ax[1].imshow(rs, cmap=plt.cm.seismic, vmin=-1, vmax=1)
+    # ax[0].imshow(10 * np.log10(intensity[:, :, 0]))
+    ax[0].imshow(ps)
 
-    # plt.ylabel('Pixels')
-    # plt.show()
+    ax[2].imshow(poly[:, :, 0], cmap=plt.cm.seismic, vmin=-1, vmax=1)
+    ax[2].set_title(f'Degree 0')
+    ax[3].imshow(poly[:, :, 1], cmap=plt.cm.seismic, vmin=-1, vmax=1)
+    ax[3].set_title(f'Degree 1')
+    plt.show()
+
+    # for i in range(coherence.shape[0]):
+    #     for j in range(coherence.shape[1]):
+    #         plt.imshow(np.angle(coherence[j, i, :, :]))
+    #         plt.show()
 
     TS_method = 'NN'
 
@@ -506,18 +472,19 @@ def main():
     print('creating output folder')
     os.mkdir(os.path.join(os.getcwd(), outputs))
 
-    for i in range(poly.shape[2]):
-        path = os.path.join(os.getcwd(), outputs,
-                            f'./degree_{i}.fit')
-        io.write_image(path, poly[:, :, i].astype(
-            np.float32), geocode=geom_path)
+    slope_path = os.path.join(os.getcwd(), outputs,
+                              './slope.fit')
+
+    intercept_path = os.path.join(os.getcwd(), outputs,
+                                  './intercept.fit')
 
     r_path = os.path.join(os.getcwd(), outputs,
                           './correlation.fit')
 
-    io.write_image(r_path, rs.astype(np.float32), geocode=geom_path)
-    poly = None
-    rs = None
+    slopes = poly[:, :, 0].astype(np.float32)
+    io.write_image(slope_path, np.sign(slopes) * np.log10(np.abs(slopes)))
+    io.write_image(intercept_path, poly[:, :, 1].astype(np.float32))
+    io.write_image(r_path, rs.astype(np.float32))
 
     do_write_timeseries = True
 
@@ -538,17 +505,18 @@ def main():
         sm_path = os.path.join(os.getcwd(), outputs,
                                './sm_ts/')
 
-        out_geom = os.path.join(os.getcwd(), outputs,
-                                './geom_subset/')
+        geom_out_path = os.path.join(os.getcwd(), outputs,
+                                     './geom_subset/')
 
-        write_geometry(geom_path, out_geom, sample_size=sample_size)
+        write_geometry(geom_path)
 
         write_timeseries(corrected_timeseries, dates,
-                         kappa_corrected, corrected_path, geocode=geom_path)
+                         kappa_corrected, corrected_path)
         write_timeseries(uncorrected_ts, dates,
-                         kappa_uncorrected, uncorrected_path, geocode=geom_path)
+                         kappa_uncorrected, uncorrected_path)
+
         write_timeseries(sm_ts, dates,
-                         kappa_uncorrected, sm_path, geocode=geom_path)
+                         kappa_uncorrected, sm_path)
 
 
 main()

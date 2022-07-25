@@ -1,3 +1,12 @@
+import psutil
+import os
+from lc_filter import filter as lc_filter
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn.decomposition import PCA, FastICA
+from skimage.restoration import denoise_nl_means, estimate_sigma
+from scipy import linalg
+from scipy.stats import chi2
+from scipy import stats, special
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.ndimage import uniform_filter, median_filter
@@ -6,15 +15,60 @@ import isceobj
 import isceobj.Image.IntImage as IntImage
 import isceobj.Image.SlcImage as SLC
 from isceobj.Image import createImage
-from scipy import stats, special
-from scipy.stats import chi2
-from scipy import linalg
-from skimage.restoration import denoise_nl_means, estimate_sigma
-from sklearn.decomposition import PCA, FastICA
-from mpl_toolkits.mplot3d import Axes3D
-from lc_filter import filter as lc_filter
-import os
-import psutil
+import geocodeGdal
+import isceio as io
+
+
+class dotdict(dict):
+    """dot.notation access to dictionary attributes"""
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
+
+def get_bbox(geom_path):
+    lat = io.load_file(os.path.join(geom_path, 'lat.rdr.full'))
+    minLat = np.min(lat)
+    maxLat = np.max(lat)
+    lat = None
+
+    lon = io.load_file(os.path.join(geom_path, 'lon.rdr.full'))
+
+    minLon = np.min(lon)
+    maxLon = np.max(lon)
+    lon = None
+
+    return [minLat, maxLat, minLon, maxLon]
+
+
+def geocode(file, geom_path, bbox=None, lat_step=0.0001, lon_step=0.0001):
+
+    lat_file = os.path.join(geom_path, 'lat.rdr.full')
+    lon_file = os.path.join(geom_path, 'lon.rdr.full')
+
+    assert os.path.exists(lat_file)
+    assert os.path.exists(lon_file)
+
+    if bbox is None:
+        bbox = get_bbox(geom_path)
+
+    inps = {
+        'prodlist': [file],
+        'bbox': bbox,
+        'latFile': lat_file,
+        'lonFile': lon_file,
+        'latStep': lat_step,
+        'lonStep': lon_step,
+        'isAlexGrid': False,
+        'istiff': False,
+        'xOff': 0,
+        'yOff': 0,
+        'resamplingMethod': 'near'
+    }
+
+    inps = dotdict(inps)
+
+    geocodeGdal.runGeo(inps)
 
 
 def eig_decomp(cov):
@@ -53,6 +107,10 @@ def eig_decomp(cov):
     return cov.reshape((shape[0], shape[1], shape[2]))
 
 
+def gen_logistic(x, L, k, b):
+    return (L / (1 + np.exp(k * x))) + b
+
+
 def intensity_to_epsilon(intensities, scaling=0.046):
     print(intensities.shape)
     intensities /= scaling
@@ -76,13 +134,13 @@ def compute_tc(cov, phi_est):
 
 
 def get_intensity(cov):
-    return np.log10(np.abs(np.diagonal(cov)))
+    return np.log10(np.abs(np.diagonal(cov)))  # try without log
 
 
 def gen_lstq(x, y, W=None, C=None, function='linear'):
-    if function is 'linear':
-        G = np.stack([x]).T
-    if function is 'lineari':
+    # if function is 'linear':
+    #     G = np.stack([x]).T
+    if function is 'linear' or 'lineari':
         G = np.stack([np.ones(x.shape[0]), x]).T
     elif function is 'root3':
         G = np.stack([x, np.sign(x) * np.abs(x)**(1/3)]).T
@@ -90,7 +148,6 @@ def gen_lstq(x, y, W=None, C=None, function='linear'):
         G = np.stack([x, np.sign(x) * np.abs(x)**(1/3),
                       np.sign(x) * np.abs(x)**(1/5)]).T
 
-    print(f'Cond(G): {np.linalg.cond(G)}')
     if C is not None:
         C_inv = C
     else:
@@ -125,12 +182,34 @@ def fit_phase_ratio(iratio, nlphase, degree):
     return np.flip(np.hstack(([0, 0], np.linalg.lstsq(G, nlphase)[0])))
 
 
-def intensity_closure(i1, i2, i3):
-    triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
-    triplet = triplet * (i1 * i2 * i3)
+def logistic(x, k=1, L=1):
+    return L * ((1/(1 + np.exp(x * k))) - (1/2))
+
+
+def intensity_closure(i1, i2, i3, norm=False, legacy=False, cubic=False, filter=1):
+    a = 1
+
+    # plt.imshow(i1)
+    # plt.show()
+
+    i1 = multilook(i1, (filter, filter))
+    i2 = multilook(i2, (filter, filter))
+    i3 = multilook(i3, (filter, filter))
+
+    if legacy:
+        triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
+    else:
+        triplet = logistic(i2 - i1, k=a) + logistic(i3 - i2,
+                                                    k=a) - logistic(i3 - i1, k=a)
+
+    if norm:
+        if legacy:
+            triplet = triplet * (i1 * i2 * i3)
+        else:
+            triplet = triplet / np.sqrt(i1**2 + i2**2 + i3**2)
+    if cubic:
+        triplet = np.sign(triplet) * (np.abs(triplet))**(1/3)
     return triplet
-    # return ((i2 - i1) + (i3 - i2) + (i1 - i3))
-    return np.sign(triplet) * (np.abs(triplet))**(1/3)
 
 
 def phase_closure(phi12, phi23, phi13):
@@ -153,20 +232,32 @@ def non_local_filter(image, sig):
     return denoise_fast
 
 
-def non_local_complex(image, sig):
-    return denoise_nl_means(
-        image.real, h=0.8 * sig, sigma=sig, fast_mode=True) + 1j * denoise_nl_means(
-            image.imag, h=0.8 * sig, sigma=sig, fast_mode=True)
+def non_local_complex(image, sig=None):
+
+    if sig is not None:
+        return denoise_nl_means(
+            image.real, h=0.8 * sig, sigma=sig, fast_mode=True) + 1j * denoise_nl_means(
+                image.imag, h=0.8 * sig, sigma=sig, fast_mode=True)
+    elif sig is None:
+        return denoise_nl_means(
+            image.real, fast_mode=True) + 1j * denoise_nl_means(
+                image.imag, fast_mode=True)
 
 
-def multilook(im, ml=(8, 2), thin=(8, 2)):
+def multilook(im, ml=(8, 2), thin=None):
     '''
         Use a uniform guassian filter to multilook a complex image.
     '''
-    outshape = (im.shape[0] // ml[0], im.shape[1] // ml[1])
-    imf = uniform_filter(im.real, size=ml) + 1j * \
-        uniform_filter(im.imag, size=ml)
-    # imf = imf[::ml[0]//2, ::ml[1]//2].copy()[:outshape[0], :outshape[1]]
+    # outshape = (im.shape[0] // ml[0], im.shape[1] // ml[1])
+    if im.dtype == np.complex64 or im.dtype == np.complex128:
+        imf = uniform_filter(im.real, size=ml) + 1j * \
+            uniform_filter(im.imag, size=ml)
+    elif im.dtype == np.float64 or im.dtype == np.float32:
+        imf = uniform_filter(im, size=ml)
+
+    if thin is not None:
+        imf = imf[::thin[0], ::thin[1]]
+
     return imf
 
 
@@ -260,7 +351,7 @@ def interfere(stack, refi, seci, scaling=None, sample=None, show=True, ml=(1, 1)
             ax1[1].set_aspect(aspect)
         plt.show()
 
-    return interferogram
+    return interferogram.conj()
 
 
 def landcover_filter(image, landcover, size, get_count=False, stat='mean', real_only=False):

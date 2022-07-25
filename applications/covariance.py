@@ -12,10 +12,8 @@ class CovarianceMatrix():
         slcn = stack.shape[0]
 
         if sample is not None:
-            cov = np.zeros((slcn, slcn, int((
-                stack.shape[1] / sample[0])), int((stack.shape[2] / sample[1]))), dtype=np.complex64)
-
-            print(cov.shape)
+            cov = np.zeros((slcn, slcn, stack[:, ::sample[0], :: sample[1]].shape[1],
+                            stack[:, ::sample[0], :: sample[1]].shape[2]), dtype=np.complex64)
         else:
             cov = np.zeros(
                 (slcn, slcn, stack.shape[1], stack.shape[2]), dtype=np.complex64)

@@ -12,6 +12,11 @@ from matplotlib import pyplot as plt
 def eval_sytstematic_closure(amptriplets, model, form='linear'):
     '''
         Evaluate amplitude triplets based on model parameters in either a linear or cubic root form
+
+        linear form neglects the constant/intercept term
+
+        lineari includes the constant
+
     '''
     if form is 'linear':
         est_closures = model[0] * amptriplets.flatten()

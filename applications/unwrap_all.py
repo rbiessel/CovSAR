@@ -30,16 +30,17 @@ def cmdLineParser():
     return parser.parse_args()
 
 
-def unwrap_interferogram(int_path, coh_path, rlooks, alooks):
+def unwrap_interferogram(int_path, coh_path, rlooks, alooks, platform='S1'):
     int_path = int_path.replace('unwrapped', 'wrapped')
     out_path = int_path.replace('wrapped', 'unwrapped')
     unwrap.unwrap_snaphu(int_path, coherenceFile=coh_path, unwrapFile=out_path,
-                         metadata=None, range_looks=rlooks, azimuth_looks=alooks)
+                         metadata=None, range_looks=rlooks, azimuth_looks=alooks, platform='S1')
 
 
 def main():
     inputs = cmdLineParser()
     int_files = sorted(glob.glob(inputs.interferogramFiles))
+    int_files = [file for file in int_files if 'geo_' not in file]
     for i in range(len(int_files)):
         p = Process(target=unwrap_interferogram, args=(
             int_files[i], inputs.coherenceFile, inputs.rlooks, inputs.alooks))

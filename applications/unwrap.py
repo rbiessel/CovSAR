@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Author: Heresh Fattahi
+# Original Author: Heresh Fattahi
 # Modified by Rowan Biessel
 
 import os
@@ -77,19 +77,19 @@ def extractInfo(inps):
     return data
 
 
-def unwrap_snaphu(interferogramFile, coherenceFile, unwrapFile, metadata, range_looks: int, azimuth_looks: int):
+def unwrap_snaphu(interferogramFile, coherenceFile, unwrapFile, metadata, range_looks: int, azimuth_looks: int, platform='S1'):
     length, width = getSize(interferogramFile)
 
     from contrib.Snaphu.Snaphu import Snaphu
 
-    if metadata is None:
+    if platform is 'S1':
         altitude = 800000.0
         earthRadius = 6371000.0
         wavelength = 0.056
-    else:
-        altitude = metadata['altitude']
-        earthRadius = metadata['earthRadius']
-        wavelength = metadata['wavelength']
+    elif platform is 'UAVSAR':
+        altitude = 12495.0
+        earthRadius = 6371000.0
+        wavelength = 0.2384035
 
     snp = Snaphu()
     snp.setInitOnly(False)
