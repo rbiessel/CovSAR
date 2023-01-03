@@ -1,4 +1,3 @@
-from turtle import forward
 from sm_forward import SMForward
 import numpy as np
 from matplotlib import pyplot as plt

@@ -10,9 +10,9 @@ from matplotlib import pyplot as plt
 import library as sarlab
 
 
-def write_image(outfile_path, data, geocode=None, length=None, width=None):
+def write_image(outfile_path, data, geocode=None, length=None, width=None, dtype='FLOAT'):
     '''
-        Write out image in ISCE format. Assumed to be of dtype FLOAT
+        Write out image in ISCE format.
     '''
 
     image = createImage()
@@ -27,7 +27,7 @@ def write_image(outfile_path, data, geocode=None, length=None, width=None):
     image.setLength(length)
     image.setAccessMode('write')
     image.filename = outfile_path
-    image.dataType = 'FLOAT'
+    image.dataType = dtype
     image.createImage()
     image.dump(f'{outfile_path}.xml')
     data.tofile(outfile_path)

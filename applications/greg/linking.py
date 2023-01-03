@@ -5,7 +5,7 @@ Created on Oct 25, 2021
 '''
 import numpy as np
 from scipy.linalg import eigh
-
+from numba import njit
 from greg.preproc import (
     correlation, force_doubly_nonnegative, force_doubly_nonnegative_py)
 
@@ -31,9 +31,9 @@ def EMI(C_obs, G=None, corr=True):
 
 
 def EMI_py_stack(C_obs, G=None, corr=True):
-    print(C_obs.shape)
     ts = np.zeros((C_obs.shape[2], C_obs.shape[3],
                    C_obs.shape[0]), dtype=np.complex64)
+
     for i in range(C_obs.shape[2]):
         for j in range(C_obs.shape[3]):
             ts[i, j, :] = EMI_py(C_obs[:, :, i, j], G=None, corr=corr)

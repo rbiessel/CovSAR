@@ -61,7 +61,7 @@ def write_timeseries(phi_hist_eig, dates, kappa, outputs, intensity=None, geocod
     io.write_image(kappa_path, np.abs(kappa), geocode=geocode)
 
 
-def write_geometry(geom_path, outputs, sample_size):
+def write_geometry(geom_path, outputs, clip=[0, -1, 0, -1], sample_size=(1, 1)):
     if os.path.exists(os.path.join(os.getcwd(), outputs)):
         print('Output folder already exists, clearing it')
         shutil.rmtree(os.path.join(os.getcwd(), outputs))
@@ -72,9 +72,13 @@ def write_geometry(geom_path, outputs, sample_size):
     files = ['lat', 'lon', 'hgt', 'incLocal', 'shadowMask', 'los']
 
     for file in files:
-        path = os.path.join(geom_path, f'{file}.rdr.full')
-        outpath = os.path.join(outputs, f'{file}.rdr.full')
-        subset_image(path, outpath, 0, -1, 0, -1, sample=sample_size)
+        try:
+            path = os.path.join(geom_path, f'{file}.rdr.full')
+            outpath = os.path.join(outputs, f'{file}.rdr.full')
+            subset_image(path, outpath, clip[2], clip[3],
+                         clip[0], clip[1], sample=sample_size)
+        except:
+            print(f'Could not locate file {file} -- Ignoring...')
 
 
 def main():

@@ -7,6 +7,7 @@ import library as sarlab
 from scipy import stats, special
 from scipy.stats import chi2
 from matplotlib import pyplot as plt
+from numba import njit
 
 
 def eval_sytstematic_closure(amptriplets, model, form='linear'):
@@ -61,22 +62,50 @@ def get_triplets(num, force=None, all=False):
     return combinations
 
 
-def build_A(triplets, coherence):
+def build_A(triplets, coherence, zero_indexes=[]):
     '''
       Using the triplet SLC indexes and an array of phi_indexes that
     '''
 
     phi_indexes = collapse_indexes(coherence)
 
+    print(phi_indexes)
+
     A = np.zeros((triplets.shape[0], len(phi_indexes)))
     for i in range(triplets.shape[0]):
         a = A[i]
         triplet = triplets[i]
-        a[np.where(phi_indexes == f'{triplet[0]}{triplet[1]}')] = 1
-        a[np.where(phi_indexes == f'{triplet[0]}{triplet[2]}')] = -1
-        a[np.where(phi_indexes == f'{triplet[1]}{triplet[2]}')] = 1
+
+        i1string = f'{triplet[0]}{triplet[1]}'
+        i2string = f'{triplet[0]}{triplet[2]}'
+        i3string = f'{triplet[1]}{triplet[2]}'
+
+        i1 = np.where(phi_indexes == i1string)
+        i2 = np.where(phi_indexes == i2string)
+        i3 = np.where(phi_indexes == i3string)
+
+        # a[i1] = 1
+        # a[i2] = -1
+        # a[i3] = 1
+
+        if i1string in zero_indexes:
+            a[i1] = 0
+        else:
+            a[i1] = 1
+
+        if i2string in zero_indexes:
+            a[i2] = 0
+        else:
+            a[i2] = -1
+
+        if i3string in zero_indexes:
+            a[i3] = 0
+        else:
+            a[i3] = 1
 
     rank = np.linalg.matrix_rank(A)
+
+    print(A)
     return A, rank
 
 
@@ -250,8 +279,7 @@ def least_norm(A, closures: np.float32 or np.float64, pseudo_inv=None, pinv=Fals
 
     if pinv and not pseudo_inv:
         phis = np.linalg.pinv(A) @ closures
-        # phis = A.T.conj() @ closures
-        # return phis / phis.shape[0]
+
     else:
         phis = A.T @ np.linalg.inv(A @ A.T) @ closures
 
@@ -264,3 +292,13 @@ def phi_to_closure(A, phic) -> np.complex64:
         the angle xi = phi_12 + phi_23 - phi_13
     '''
     return np.exp(1j * A @ np.angle(phic))
+
+
+def cumulative_mask(triplets):
+
+    mask = np.full((triplets.shape[0]), False, dtype=bool)
+    for i in range(mask.shape[0]):
+        if (triplets[i, 2] - triplets[i, 1] == 1) and (triplets[i, 1] - triplets[i, 0] == 1):
+            mask[i] = True
+
+    return mask

@@ -1,6 +1,11 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import griddata
+import colorcet as cc
+from matplotlib.cm import get_cmap
+import figStyle
+
+cyclic_cm = get_cmap('cet_CET_C8')
 
 
 def interpolate_phase_intensity(raw_intensities, error_coh, plot=False):
@@ -26,10 +31,10 @@ def interpolate_phase_intensity(raw_intensities, error_coh, plot=False):
     if plot:
         fig, ax = plt.subplots(nrows=1, ncols=2)
         im = ax[0].imshow(grid_z2.T, extent=(
-            imin, imax, imin, imax), origin='lower', cmap=plt.cm.hsv, vmin=-np.pi/2, vmax=np.pi/2)
+            imin, imax, imin, imax), origin='lower', cmap=cyclic_cm, vmin=-np.pi/30, vmax=np.pi/30)
 
         ax[0].scatter(points[:, 0], points[:, 1],
-                      marker='o', s=20, facecolors='none', edgecolors='black')
+                      marker='o', s=15, facecolors='none', edgecolors='black')
 
         ax[0].contour(grid_z2.T, colors='k', origin='lower', extent=(
             imin, imax, imin, imax))
@@ -43,7 +48,7 @@ def interpolate_phase_intensity(raw_intensities, error_coh, plot=False):
     dif_interpolated = dif_interpolated.T - dif_interpolated
     dif_interpolated = np.flip(dif_interpolated, axis=0)
 
-    m = 20
+    m = 10
 
     gradient = (grid_z2[-m, -m] - grid_z2[-1, -1]) / (
         (dif_interpolated[-m, -m] - dif_interpolated[-1, -1]))
@@ -56,11 +61,11 @@ def interpolate_phase_intensity(raw_intensities, error_coh, plot=False):
 
     if plot:
         ax[1].imshow(with_linear_phase, extent=(
-            imin, imax, imin, imax), origin='lower', cmap=plt.cm.hsv, vmin=-np.pi/2, vmax=np.pi/2)
+            imin, imax, imin, imax), origin='lower', cmap=cyclic_cm, vmin=-np.pi/10, vmax=np.pi/10)
         ax[1].contour(with_linear_phase, colors='k', origin='lower', extent=(
             imin, imax, imin, imax))
-        ax[1].set_xlabel('Backscatter Intensity (Reference)')
-        ax[1].set_ylabel('Backscatter Intensity (Secondary)')
+        ax[1].set_xlabel('Reference Intensity [$dB$]')
+        ax[1].set_ylabel('Seconday Intensity [$dB$]')
         fig.tight_layout()
 
         fig.subplots_adjust(right=0.8)

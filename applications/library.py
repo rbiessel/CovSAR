@@ -26,6 +26,35 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 
+def reduce_cov(cov, keep_diag=1):
+    cov = np.swapaxes(cov, 0, 2)
+    cov = np.swapaxes(cov, 1, 3)
+
+    if keep_diag > 0:
+        cov = np.triu(cov, -keep_diag)
+        cov = np.tril(cov, keep_diag)
+    elif keep_diag < 0:
+        cov = np.tril(cov, keep_diag)
+        cov += np.transpose(cov, (0, 1, 3, 2)).conj()
+        # cov = np.triu(cov, keep_diag)
+
+    cov = np.swapaxes(cov, 1, 3)
+    cov = np.swapaxes(cov, 0, 2)
+
+    return cov
+
+
+def mean_coh(coh, baseline=1):
+    """
+        Get coherence given a baseline in as a multiple of the smallest baseline. 
+        IE baseline=1 returns the averagenearest neighbor coherence
+    """
+    coh = np.swapaxes(coh, 0, 2)
+    coh = np.swapaxes(coh, 1, 3)
+    nearestNeighbor = np.abs(coh.diagonal(offset=baseline, axis1=2, axis2=3))
+    return np.mean(nearestNeighbor, axis=2)
+
+
 def get_bbox(geom_path):
     lat = io.load_file(os.path.join(geom_path, 'lat.rdr.full'))
     minLat = np.min(lat)
@@ -140,7 +169,7 @@ def get_intensity(cov):
 def gen_lstq(x, y, W=None, C=None, function='linear'):
     # if function is 'linear':
     #     G = np.stack([x]).T
-    if function is 'linear' or 'lineari':
+    if function is 'linear':
         G = np.stack([np.ones(x.shape[0]), x]).T
     elif function is 'root3':
         G = np.stack([x, np.sign(x) * np.abs(x)**(1/3)]).T
@@ -159,6 +188,9 @@ def gen_lstq(x, y, W=None, C=None, function='linear'):
         covm = np.linalg.inv(Gw.T @ Gw)
         m = covm @ Gw.T @ dw
     else:
+        if function is 'linear':
+            m = np.polyfit(x, y, deg=1)
+            return m, None
         m = np.linalg.inv(G.T @ C_inv @ G) @ G.T @ C_inv @ y
         covm = None
 
@@ -183,24 +215,28 @@ def fit_phase_ratio(iratio, nlphase, degree):
 
 
 def logistic(x, k=1, L=1):
-    return L * ((1/(1 + np.exp(x * k))) - (1/2))
+    return L * ((1/(1 + np.exp(-x * k))) - (1/2))
 
 
-def intensity_closure(i1, i2, i3, norm=False, legacy=False, cubic=False, filter=1):
-    a = 1
+def intensity_closure(i1, i2, i3, norm=False, legacy=False, cubic=False, filter=1, inc=None):
 
-    # plt.imshow(i1)
-    # plt.show()
+    if filter > 1:
+        i1 = multilook(i1, (filter, filter))
+        i2 = multilook(i2, (filter, filter))
+        i3 = multilook(i3, (filter, filter))
 
-    i1 = multilook(i1, (filter, filter))
-    i2 = multilook(i2, (filter, filter))
-    i3 = multilook(i3, (filter, filter))
+    if inc is None:
+        a = 1
+    else:
+        a = 1/np.tan(np.radians(inc))
 
     if legacy:
         triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
     else:
-        triplet = logistic(i2 - i1, k=a) + logistic(i3 - i2,
-                                                    k=a) - logistic(i3 - i1, k=a)
+        triplet = (logistic((i2 - i1), k=a) + logistic((i3 - i2),
+                                                       k=a) - logistic((i3 - i1), k=a))
+
+        # triplet = triplet * 1000
 
     if norm:
         if legacy:
@@ -351,7 +387,7 @@ def interfere(stack, refi, seci, scaling=None, sample=None, show=True, ml=(1, 1)
             ax1[1].set_aspect(aspect)
         plt.show()
 
-    return interferogram.conj()
+    return interferogram
 
 
 def landcover_filter(image, landcover, size, get_count=False, stat='mean', real_only=False):

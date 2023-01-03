@@ -7,9 +7,34 @@ import closures
 from sm_forward.sm_forward import SMForward
 import library as sarlab
 from scipy.stats import gaussian_kde
+import pandas as pd
+
+dezan = SMForward(imag_slope=0.1, r_A=0.05, r_B=0.3, r_C=4)
+
+sm_path = '/Users/rbiessel/Documents/dalton_SWC/SlopeMountain/SM_SWC1_2022.csv'
 
 
-dezan = SMForward(imag_slope=0.1, r_A=0.05, r_B=0.1, r_C=4)
+def read_sm_from_file(path):
+    df = pd.read_csv(path, sep=",", header=1)
+
+    # df.columns = df.columns.str.replace(' ', '')
+
+    # years = df['Yr'].str.strip().values[1:]
+    # months = df['Mo'].str.strip().values[1:]
+    # days = df['Day'].str.strip().values[1:]
+    # hours = df['Hr'].values[1:].astype(str)
+    # mins = df['Min'].str.strip().values[1:]
+
+    # dates = (years + '-' + months + '-' + days +
+    #          'T' + hours + ':' + mins)
+    # dates = dates[np.where(dates != '--')]
+    # dates = pd.to_datetime(dates)
+
+    # WASM = df['SM-1'].values[1:].astype(np.float32)
+    WASM = df["Water Content, m³/m³ (LGR S/N: 21152731, SEN S/N: 21153846)"].values
+    # print(dates)
+    # print(WASM)
+    return WASM
 
 
 def build_nl_coherence(nl_func, sm):
@@ -97,8 +122,9 @@ def main():
     max_closures = np.zeros(lookvector.shape)
     # amplitude = 1
 
-    n = 20
-    days = np.arange(0, 12*n, 12)
+    n = 30  # length of timeseries
+    p = 2  # repeat time
+    days = np.arange(0, p*n, p)
     baslines = np.tile(days, (len(days), 1))
     baslines = baslines.T - baslines
 
@@ -106,7 +132,22 @@ def main():
 
     # sm_stack = np.zeros((n, amplitude.shape[0], amplitude.shape[1]))
     # sm = np.abs(np.random.normal(scale=10, loc=25, size=n))
-    sm = np.linspace(40, 10, n) + np.random.normal(scale=1, loc=0, size=n)
+    sm_1 = np.linspace(50, 10, n)  # + np.random.normal(scale=1, loc=0, size=n)
+    # sm_1[5] = 60
+    # sm = np.ones((n)) * 30
+
+    # sm_exp = 10 * np.exp(-1 * days) + 20
+    # sm_exp[np.where(days <= 20)] = 0
+
+    # sm = read_sm_from_file(sm_path) * 100
+    # sm = sm[350:350 + p*n]
+    # sm = sm[::p] / 10
+
+    sm = sm_1 / 10
+
+    plt.plot(days, sm)
+    plt.show()
+    # sm = sm_1
     # size = sm_stack.shape[1] * sm_stack.shape[2]
     # for i in range(n):
     #     base_sm = sm[i]
@@ -159,9 +200,16 @@ def main():
             true_coherence[i, j] = np.exp(
                 1j * (np.mean((velocity) * (days[j] - days[i])) * 4 * np.pi / 5.6))
 
-    # coherence = coherence * build_nl_coherence(sm_to_phase_sqrt, sm)
-    # coherence = coherence * build_nl_coherence(sm_to_phase_sqrt, sm)
-    coherence = coherence * build_nl_coherence_dezan(sm, dezan)
+    errors = build_nl_coherence_dezan(sm, dezan)
+    diag_errors = np.diag(errors, k=1)
+    error_ts_bw1 = np.cumprod(diag_errors)
+    coherence = coherence * errors
+
+    # plt.imshow(np.angle(errors))
+    # plt.show()
+    plt.plot(np.angle(diag_errors))
+    plt.plot(sm / np.max(sm))
+    plt.show()
 
     triplets = closures.get_triplets(n, all=False)
 

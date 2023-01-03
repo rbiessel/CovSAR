@@ -22,14 +22,14 @@ def main():
     if not args.uavsar:
         slc = io.load_stack([args.path])[0]
     else:
-        slc = io.load_stack_uavsar([args.path], cols=11699, rows=4822)[0]
+        slc = io.load_stack_uavsar([args.path], cols=12412, rows=4942)[0]
     ml = True
 
     slc = slc * slc.conj()
     mled = multilook(slc, ml=(4, 1), thin=(1, 1))
     # nl = non_local_complex(slc, sig=1000)
 
-    image = np.log10(np.abs(mled))
+    image = np.log10(np.abs(mled * mled.conj()))
 
     image[np.isnan(image)] = 0
     image[np.isinf(image)] = 0

@@ -5,8 +5,9 @@ from multiprocessing import Process
 
 
 class CovarianceMatrix():
-    def __init__(self, stack,  ml_size=(20, 4), sample=(7, 7), landcover=None, sig=None):
-        print('computing covariance matrix')
+    def __init__(self, stack,  ml_size=(20, 4), sample=(7, 7), landcover=None, sig=None, doprint=True):
+        if doprint:
+            print('Computing Covariance Matrix')
         if landcover is not None:
             print('Landcover size: ', landcover.shape)
         slcn = stack.shape[0]
@@ -27,8 +28,10 @@ class CovarianceMatrix():
                 stack, i, j, ml=ml_size, show=False, aspect=1, scaling=1, sample=sample, cov=True, landcover=landcover, sig=sig)
             if j != i:
                 cov[j, i, :, :] = cov[i, j, :, :].conj()
-            print(
-                f'Computing Filtered Interferograms: {int(((self.n)/total ) * 100)}%', end="\r", flush=True)
+
+            if doprint:
+                print(
+                    f'Computing Filtered Interferograms: {int(((self.n)/total ) * 100)}%', end="\r", flush=True)
 
         for i in range(slcn):
             for j in range(slcn):
@@ -41,7 +44,7 @@ class CovarianceMatrix():
         return self.cov
 
     def get_intensity(self):
-        return np.log10(np.abs(np.diagonal(self.cov)))
+        return 10 * np.log10(np.abs(np.diagonal(self.cov)))
 
     def get_coherence(self):
         coherence = np.zeros(self.cov.shape, dtype=np.complex64)

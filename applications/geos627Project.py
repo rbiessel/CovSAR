@@ -5,7 +5,8 @@ from matplotlib import pyplot as plt
 from scipy import special
 from interpolate_phase import interpolate_phase_intensity
 
-dezan = SMForward(imag_slope=0.1, r_A=0.02, r_B=0.01, r_C=4)
+# dezan = SMForward(imag_slope=0.1, r_A=0.02, r_B=0.01, r_C=4)
+dezan = SMForward(imag_slope=0.1, r_A=0.01, r_B=0.01, r_C=4)
 
 
 def sm_to_phase_sqrt(sm):
@@ -93,7 +94,7 @@ def sm_to_matrix(sm):
 
 
 def main():
-    ns = np.arange(3, 25, 1)
+    ns = np.arange(0, 25, 1)
     k = special.comb(ns - 1, 2)
     phik = special.comb(ns, 2)
 
@@ -108,8 +109,8 @@ def main():
     # return
     # plt.plot(phik, k, '.', label='Independent Phase Closures')
     # plt.plot(phik, phik, '--', label='1:1')
-    # plt.xlabel('Parameters')
-    # plt.ylabel('Observations')
+    # plt.xlabel('Phases')
+    # plt.ylabel('Independent Closure Phases')
     # plt.legend(loc='upper left')
     # # plt.axis('equal')
     # plt.xlim(0, 250)
@@ -119,7 +120,7 @@ def main():
     n = 10
     deformation = np.exp(1j * np.linspace(0, 2, n))
 
-    sm = np.abs(np.linspace(10, 60, n) + (np.random.rand(n) * 2))
+    sm = np.abs(np.linspace(20, 80, n) + (np.random.rand(n) * 2))
     # sm[3] = sm[4]
     # sm[7] = sm[5]
     sm_difs = closures.coherence_to_phivec(sm_to_matrix(sm))

@@ -101,5 +101,6 @@ class SMForward:
         k2 = self.k_prime(eps2)
 
         phi = (2j * np.sqrt(k2.imag * k1.imag)) / (k2.conj() - k1)
-
+        # gamma = 1 / ((2j * k1) - (2j * k2.conj()))
+        # return gamma
         return np.nan_to_num(phi)
