@@ -4,6 +4,7 @@ message: >-
   If you use this software, please cite it using the
   metadata from this file.
 type: software
+version: 0.1.0
 authors:
   - given-names: Rowan
     family-names: Biessel
