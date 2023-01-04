@@ -6,7 +6,7 @@ The core script "./applications/closure_inten.py" will compute a phase history a
 
 For use with UAVSAR data, the file "./applications/subset_uavsar.py" converts a stack of UAVSAR SLCs into a format that's compatible with a Sentinel-1 stack.
 
-Please note that this repository is experimental code I have not optimized it easy use or speed.
+Please note that this repository is experimental code I have not optimized it to be easy to use or fast.
 
 ## Requirements
 
@@ -18,4 +18,4 @@ Contact me at rbiessel@alaska.edu
 
 ## Citation
 
-R. Biessel and S. Zwieback, “CovSAR.” Jul. 22, 2022. Available: https://github.com/rbiessel/CovSAR
+R. Biessel and S. Zwieback, “CovSAR.” Jul. 22, 2022. Accessed: Jan. 03, 2023. [Online]. Available: https://github.com/rbiessel/CovSAR
