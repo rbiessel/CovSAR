@@ -26,7 +26,17 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 
+def sbas_cov(cov, remove_phis=[]):
+    for i in range(cov.shape[0]):
+        for j in range(cov.shape[1]):
+            if i+j in remove_phis or j+i in remove_phis:
+                cov[:, :, i, j] = 0
+
+    return cov
+
+
 def reduce_cov(cov, keep_diag=1):
+    ogcov = cov
     cov = np.swapaxes(cov, 0, 2)
     cov = np.swapaxes(cov, 1, 3)
 
@@ -41,7 +51,7 @@ def reduce_cov(cov, keep_diag=1):
     cov = np.swapaxes(cov, 1, 3)
     cov = np.swapaxes(cov, 0, 2)
 
-    return cov
+    return np.abs(cov) * np.exp(1j * np.angle(ogcov))
 
 
 def mean_coh(coh, baseline=1):
@@ -70,7 +80,7 @@ def get_bbox(geom_path):
     return [minLat, maxLat, minLon, maxLon]
 
 
-def geocode(file, geom_path, bbox=None, lat_step=0.0001, lon_step=0.0001):
+def geocode(file, geom_path, bbox=None, lat_step=0.001, lon_step=0.001):
 
     lat_file = os.path.join(geom_path, 'lat.rdr.full')
     lon_file = os.path.join(geom_path, 'lon.rdr.full')
@@ -134,10 +144,6 @@ def eig_decomp(cov):
             f'Eigenvector Decomposition Progress: {int((cov.shape[0] / total_pixels) * 100)}%', end="\r", flush=True)
 
     return cov.reshape((shape[0], shape[1], shape[2]))
-
-
-def gen_logistic(x, L, k, b):
-    return (L / (1 + np.exp(k * x))) + b
 
 
 def intensity_to_epsilon(intensities, scaling=0.046):
@@ -218,25 +224,39 @@ def logistic(x, k=1, L=1):
     return L * ((1/(1 + np.exp(-x * k))) - (1/2))
 
 
-def intensity_closure(i1, i2, i3, norm=False, legacy=False, cubic=False, filter=1, inc=None):
+def gen_logistic(x, k=1, L=1):
+    return (L / (1 + np.exp(k * x)))
+
+
+def arctan(x, k=1, L=1):
+    return L * np.arctan(k * x)
+
+
+def tanh(x, k=1, L=1):
+    return L * np.tanh(k * x)
+
+
+def intensity_closure(i1, i2, i3, norm=False, legacy=False, cubic=False, filter=1, L=1, kappa=1, function='tanh'):
 
     if filter > 1:
         i1 = multilook(i1, (filter, filter))
         i2 = multilook(i2, (filter, filter))
         i3 = multilook(i3, (filter, filter))
 
-    if inc is None:
-        a = 1
-    else:
-        a = 1/np.tan(np.radians(inc))
-
-    if legacy:
+    if legacy or 'legacy' in function:
         triplet = ((i2 - i1) * (i3 - i2) * (i1 - i3))
     else:
-        triplet = (logistic((i2 - i1), k=a) + logistic((i3 - i2),
-                                                       k=a) - logistic((i3 - i1), k=a))
+        if function == 'tanh':
+            form = tanh
+        elif function == 'arctan':
+            form = arctan
+        else:
+            form = logistic
 
-        # triplet = triplet * 1000
+        triplet = (form((i2 - i1), k=kappa) + form((i3 - i2),
+                                                   k=kappa) - form((i3 - i1), k=kappa))
+
+        triplet *= L
 
     if norm:
         if legacy:

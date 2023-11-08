@@ -104,6 +104,30 @@ def load_stack(files):
     return SLCs
 
 
+def load_stack_ndvi(files):
+    '''
+        Load a stack of ISCE coregistered SLCs
+    '''
+    VIs = None
+    # return None
+    for i in range(len(files)):
+        print(f'Loading NDVI {i} / {len(files)}...')
+        im = createImage()
+        file = files[i]
+        file = '/'.join(file.split('/')[0:-1]) + '/ndvi.rdr.full'
+        # print(file)
+
+        im.load(file + '.xml')
+        mm = im.memMap()
+        if VIs is None:
+            VIs = np.zeros(
+                (len(files), mm.shape[1], mm.shape[2]), dtype=np.float32)
+
+        VIs[i, :, :] = mm[0, :, :]
+
+    return VIs
+
+
 def load_stack_uavsar(files, rows, cols):
     '''
         Load a stack of ISCE coregistered SLCs via their VRTs using rasterio

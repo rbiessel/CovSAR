@@ -1,13 +1,10 @@
 from latlon import latlon_to_index
 from cgitb import small
 from distutils.log import error
-from email.errors import FirstHeaderLineIsContinuationDefect
 import logging
 from operator import index
 from random import sample
 from turtle import width
-from numpy.core.arrayprint import _leading_trailing
-from numpy.lib.polynomial import polyval
 import rasterio
 from matplotlib import pyplot as plt
 import numpy as np
@@ -25,15 +22,13 @@ import isceio as io
 import closures
 import scipy.stats as stats
 from pl.nn import nearest_neighbor
-from interpolate_phase import interpolate_phase_intensity
 from scipy.stats import gaussian_kde
 from greg import linking as MLE
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.patches as mpl_patches
 from greg import simulation as greg_sim
 from triplets import eval_triplets
-from plot_bootstrapHist import plot_hist
-import figStyle
+import seaborn as sns
+import optimize_kappa as ok
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
 
@@ -57,6 +52,10 @@ def readInputs():
                         action='store_true', help='Save data at specific pixels for plotting later')
     parser.add_argument('-plat', '--platform', type=str,
                         dest='platform', required=False, default='S1', help='platform')
+    parser.add_argument('-k', '--kappa', dest='kappaOpt', required=False,
+                        action='store_true', help='optimize kappa for select pixels')
+    parser.add_argument('-tf', '--tripletform', type=str,
+                        dest='tripletform', required=False, default='tanh', help='Function used to generate intensity triplets')
     args = parser.parse_args()
     return args
 
@@ -71,7 +70,7 @@ def main():
     files = sorted(files)
     print(os.path.join(inputs.path, '/**/*.slc'))
     assert len(files) >= 1
-    # files = files[0:5]
+    files = files[:20]
 
     dates = []
     for file in files:
@@ -92,17 +91,19 @@ def main():
     clip = None
 
     clip = [0, -1, 0, -1]
-    # clip = [4000, 8000, 0, -1]
-    # clip = [0, -1, 1000, 2000]
 
-    # clip = [0, 1000, 0, 1000]
+    points = np.array([[0, 0], [1, 1]])
+
     SLCs = SLCs[:, clip[0]:clip[1], clip[2]:clip[3]]
     lf = inputs.lf
     N = SLCs.shape[0]
 
     if inputs.platform == 'S1':
         ml_size = (7*lf, 19*lf)
-        sample_size = (2 * lf, 5*lf)
+        ml_size = (1*lf, 7*lf)
+        lf = 4
+        sample_size = (2 * (lf-0), 5*(lf-0))
+        # sample_size = (2, 5)
 
     elif inputs.platform == 'UAVSAR':
         ml_size = (5 * lf, 5 * lf)
@@ -118,13 +119,6 @@ def main():
     uncorrected = coherence.copy()
     intensity = cov.get_intensity()
 
-    # points = np.indices(intensity[:, :, 0].shape)
-
-    # points = points[:, ::100, ::100]
-    # points = points.reshape((2, (points.shape[1] * points.shape[2]))).T
-    # points = points[1:]
-    # print(points)
-
     lats = io.load_geom_from_slc(files[0], file='lat')[
         ::sample_size[0], ::sample_size[1]]
     lons = io.load_geom_from_slc(files[0], file='lon')[
@@ -135,16 +129,26 @@ def main():
         lon_weather = -149.3
         weather_point = latlon_to_index(lats, lons, lat_weather, lon_weather)
         print(weather_point)
-        points = np.array([[weather_point[0], weather_point[1]], [
-                          75, 62], [85, 43], [75, 73]])
+        points = np.array(
+            [[weather_point[1], weather_point[0]], [44, 113], [42, 115], [41, 115], [42, 114]])
+        points = np.array(
+            [[weather_point[1], weather_point[0]], [45, 91], [27, 88], [49, 106], [34, 87], [22, 14]])
+        points = np.array(
+            [[weather_point[1], weather_point[0]], [90, 27], [33, 83], [23, 89], [27, 90], [28, 87], [28, 89], [28, 90], [27, 89], [26, 89], [29, 87], [30, 90], [29, 88], [29, 90]])
+
+    if 'vegas_east' in inputs.label:
+        points = np.array([[10, 10], [50, 50], [34, 17], [17, 34], [563, 233]])
+
     if 'dalton' in inputs.label:
         points = np.array(
-            [[24, 73], [150, 115], [729, 122], [777, 125], [400, 202], [482, 141]])
+            [[24, 73], [777, 125], [400, 202], [482, 141]])
 
-    # points = np.array([[153, 81], [116, 54], [75, 171]])
+        points = np.array([[153, 81], [116, 54], [75, 171], [
+                          36, 424], [171, 366], [147, 368], [177, 361], [185, 339], [207, 373], [33, 411], [49, 418], [117, 103], [182, 218], [218, 182]])
 
-    if 'delta' in inputs.label:
-        points = np.array([[10, 10], [50, 50]])
+    # if 'delta' or 'kaktovik' in inputs.label:
+    #     points = np.array([[10, 10], [50, 50]])
+    #     print()
 
     if 'DNWR' in inputs.label or 'dnwr' in inputs.label:
         lat_weather = 36.4381
@@ -160,7 +164,7 @@ def main():
 
     # points = np.array([[10, 55], [15, 55], [20, 55]])
     for i in range(intensity.shape[2]):
-        intensity[:, :, i] = sarlab.multilook(intensity[:, :, i], ml=(2, 2))
+        intensity[:, :, i] = sarlab.multilook(intensity[:, :, i], ml=(1, 1))
 
     plt.imshow(np.median(intensity[:, :, :], axis=2), cmap=plt.cm.Greys)
     plt.scatter(points[:, 0], points[:, 1], s=30,
@@ -195,46 +199,38 @@ def main():
     closure_stack = np.zeros((
         len(triplets), coherence.shape[2], coherence.shape[3]), dtype=np.complex64)
 
-    landcover_types = np.unique(landcover)
-
     amp_triplet_stack = closure_stack.copy()
     amp_triplet_stack = amp_triplet_stack.astype(np.float64)
-    amp_triplet_stack_legacy = amp_triplet_stack.copy()
 
-    amp_difference_stack = np.zeros(
-        (len(triplets), 3, coherence.shape[2], coherence.shape[3]))
     for i in range(len(triplets)):
         triplet = triplets[i]
         closure = coherence[triplet[0], triplet[1]] * coherence[triplet[1],
                                                                 triplet[2]] * coherence[triplet[0], triplet[2]].conj()
 
-        filter_strength = 4
+        filter_strength = 2
         closure = sarlab.multilook(closure, ml=(
             filter_strength, filter_strength))
 
-        fig, ax = plt.subplots(nrows=1, ncols=2)
-        ax[0].imshow(np.median(intensity[:, :, :], axis=2), cmap=plt.cm.Greys)
-        ax[1].imshow(np.angle(closure), cmap=plt.cm.seismic)
-        plt.show()
-
         amp_triplet = sarlab.intensity_closure(
-            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=False, cubic=False, filter=1, inc=None)
+            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=False, cubic=False, filter=1,  function=inputs.tripletform, kappa=1)
 
         closure_stack[i] = closure
         amp_triplet_stack[i] = amp_triplet
 
+    intensity_triplet_variance = np.var(amp_triplet_stack, 0)
     closure_stack[np.isnan(closure_stack)] = 0
     amp_triplet_stack[np.isnan(amp_triplet_stack)] = 0
 
     rs = np.zeros(landcover.shape)
-
-    ps = np.zeros(landcover.shape)
+    rsme_linear = np.zeros(landcover.shape)
 
     degree = 1
-    power = 1
 
     print('Estimating relationship')
     poly = np.zeros((landcover.shape[0], landcover.shape[1], degree + 1))
+
+    def get_rsme(predicted, observed):
+        return np.sqrt(np.sum(np.angle(np.exp(1j * (predicted - observed))) ** 2) / len(predicted))
 
     for j in range(amp_triplet_stack.shape[1]):
         for i in range(amp_triplet_stack.shape[2]):
@@ -246,173 +242,127 @@ def main():
                 intensities = np.tile(intensities, (len(intensities), 1))
                 intensities = 10 * (intensities.T - intensities)
                 ws = 0
-                window_closure = closure_stack[:, j-ws:j+ws+1, i-ws:i+ws+1]
-                window_amps = amp_triplet_stack[:,
-                                                j-ws:j+ws+1, i-ws:i+ws+1]  # [mask]
+                window_closure = closure_stack[:, j, i]
+                window_amps = amp_triplet_stack[:, j, i]
 
                 if len(window_amps.flatten()) > 2 and len(window_closure.flatten()) > 2:
-                    try:
-                        r, p = stats.pearsonr(
-                            window_amps.flatten(), np.angle(window_closure).flatten())
+                    # try:
+                    r, p = stats.pearsonr(
+                        window_amps.flatten(), np.angle(window_closure).flatten())
 
-                        r = r
-                        fitform = 'linear'
+                    fitform = 'linear'
 
-                        coeff, covm = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
-                        ), W=None, function=fitform)
-                    except:
-                        print(window_amps.flatten())
-                        print('')
-                        print(np.angle(window_closure).flatten())
-                        r = 0
-                        p = 0
-                        coeff = [0, 0]
+                    clin, covm = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
+                    ), W=None, function=fitform)
 
-                    do_huber = False
-
-                    poly[j, i, :] = coeff
-
-                    rs[j, i] = r
-                    ps[j, i] = p
-
-                    # modeled systematic closures
-                    if np.abs(r) >= 0:
-
-                        est_closures = closures.eval_sytstematic_closure(
-                            amp_triplet_stack[:, j, i], model=coeff, form='linear')
-
-                        est_closures_int = closures.eval_sytstematic_closure(
-                            amp_triplet_stack[:, j, i], model=coeff, form='lineari')
-
-                        systematic_phi_errors = closures.least_norm(
-                            A, est_closures, pinv=False, pseudo_inv=A_dagger)
-
-                        systematic_phi_errors_int = closures.least_norm(
-                            A, est_closures_int, pinv=False, pseudo_inv=A_dagger)
-
-                        uncorrected_phi_errors = closures.least_norm(
-                            A, np.random.normal(loc=-0.02, scale=0.05, size=len(
-                                closure_stack[:, j, i].flatten())), pinv=False, pseudo_inv=A_dagger)
-
-                        uncorrected_phi_errors = closures.least_norm(
-                            A, closure_stack[:, j, i].flatten(), pinv=False, pseudo_inv=A_dagger)
-
-                        error_coh = closures.phivec_to_coherence(
-                            systematic_phi_errors, coherence[:, :, j, i].shape[0])
-
-                        error_coh_int = closures.phivec_to_coherence(
-                            systematic_phi_errors_int, coherence[:, :, j, i].shape[0])
-                        error_coh_unc = closures.phivec_to_coherence(
-                            uncorrected_phi_errors, coherence[:, :, j, i].shape[0])
-
-                        # gradient = interpolate_phase_intensity(
-                        #     raw_intensities, error_coh)
-
-                        # gradient = 0
-                        # linear_phase = np.exp(
-                        #     1j * (-1 * intensities * gradient))
-
-                        # error_coh = error_coh * linear_phase
-
-                        coherence[:, :, j, i] = coherence[:,
-                                                          :, j, i] * error_coh.conj()
-
-                        # coherence[:, :, j, i] = error_coh
-
-                    # o
-                    if np.abs(r) > 1 or ((points == np.array([i, j])).all(1).any() and inputs.saveData):
-
-                        # cum_closures = np.cumsum(
-                        #     np.angle(window_closure).flatten()[cumulative_mask])
-                        # print(len(cum_closures))
-
-                        # cum_closures_slope = np.cumsum(
-                        #     est_closures[cumulative_mask])
-
-                        # cum_closures_int = np.cumsum(
-                        #     est_closures_int[cumulative_mask])
-
-                        # inten_timeseries = raw_intensities - raw_intensities[0]
-
-                        # plt.plot(cum_closures, label='Observed')
-                        # plt.plot(cum_closures_slope, label='Just slope')
-                        # plt.plot(cum_closures_int, label='Slope and Intercept')
-                        # plt.plot(inten_timeseries[1:-1], label='Intensities')
-                        # plt.legend(loc='best')
-                        # plt.title('Cumulative Closure Phase')
-                        # plt.show()
+                    if (points == np.array([i, j])).all(1).any():
                         if inputs.saveData:
                             pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}/'
-
+                            if inputs.kappaOpt:
+                                pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}_kappa/'
                             if os.path.exists(pixel_data_folder_path):
                                 print('Output folder already exists, clearing it')
                                 shutil.rmtree(pixel_data_folder_path)
                             os.mkdir(pixel_data_folder_path)
 
+                    if (points == np.array([i, j])).all(1).any() and inputs.kappaOpt:
+                        print('COMPUTING RESULTS FOR OPTIMUM KAPPA')
+                        print('first: ', (points ==
+                              np.array([i, j])).all(1).any())
+
+                        kappas, R2s = ok.get_optimum_kappa(
+                            raw_intensities, window_closure, triplets)
+
+                        pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}/'
+                        if inputs.kappaOpt:
+                            pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}_kappa/'
+
+                        np.save(os.path.join(
+                            pixel_data_folder_path, 'R2_kappas'), R2s)
+                        np.save(os.path.join(
+                            pixel_data_folder_path, 'kappas'), kappas)
+                        kappa_opt = kappas[np.argmax(R2s)]
+
+                        fig, ax = plt.subplots(nrows=1, ncols=1)
+                        ax.set_xscale('log')
+                        ax.plot(kappas * 10, R2s, '--o')
+
+                        ax.set_xlabel('kappa')
+                        ax.set_ylabel('residuals')
+                        ax.axvline(x=10)
+                        ax.axvline(x=kappa_opt * 10)
+
+                        plt.show()
+
+                        print(f'Optimum kappa = {kappa_opt}')
+
+                        for t in range(len(triplets)):
+                            triplet = triplets[t]
+
+                            window_amps[t] = sarlab.intensity_closure(
+                                raw_intensities[triplet[0]], raw_intensities[triplet[1]], raw_intensities[triplet[2]], norm=False, cubic=False, filter=1, kappa=kappa_opt, function='tanh')
+
+                        r, pval = stats.pearsonr(
+                            window_amps.flatten(), np.angle(window_closure).flatten())
+
+                        clin, covm = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
+                        ), W=None, function=fitform)
+                        # coeff = clin
+                        print(clin, r)
+
+                    poly[j, i, :] = clin
+                    rs[j, i] = r
+                    coeff = clin
+
+                    # except:
+                    #     r = 0
+                    #     p = 0
+                    #     coeff = [0, 0]
+
+                    est_closures_lin = closures.eval_sytstematic_closure(
+                        amp_triplet_stack[:, j, i], model=clin, form='linear')
+
+                    rsme_linear[j, i] = get_rsme(
+                        est_closures_lin, window_closure.flatten())
+
+                    systematic_phi_errors = closures.least_norm(
+                        A, est_closures_lin, pinv=False, pseudo_inv=A_dagger)
+
+                    # uncorrected_phi_errors = closures.least_norm(
+                    #     A, np.random.normal(loc=-0.02, scale=0.05, size=len(
+                    #         closure_stack[:, j, i].flatten())), pinv=False, pseudo_inv=A_dagger)
+
+                    # uncorrected_phi_errors = closures.least_norm(
+                    #     A, closure_stack[:, j, i].flatten(), pinv=False, pseudo_inv=A_dagger)
+
+                    error_coh = closures.phivec_to_coherence(
+                        systematic_phi_errors, coherence[:, :, j, i].shape[0])
+
+                    # error_coh_unc = closures.phivec_to_coherence(
+                    #     uncorrected_phi_errors, coherence[:, :, j, i].shape[0])
+
+                    coherence[:, :, j, i] = coherence[:,
+                                                      :, j, i] * error_coh.conj()
+
+                    # print((points == np.array([i, j])).all(1).any())
+                    if (points == np.array([i, j])).all(1).any():
+                        # print('is working?????????????')
+                        # if inputs.saveData:
+                        #     pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}/'
+                        #     if inputs.kappaOpt:
+                        #         pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{i}_{j}_kappa/'
+                        #     if os.path.exists(pixel_data_folder_path):
+                        #         print('Output folder already exists, clearing it')
+                        #         shutil.rmtree(pixel_data_folder_path)
+                        #     os.mkdir(pixel_data_folder_path)
+
                         print(f'point: ({i}, {j})')
-                        # gradient = interpolate_phase_intensity(
-                        #     raw_intensities, error_coh_unc, plot=True)
-                        # gradient = interpolate_phase_intensity(
-                        #     raw_intensities, error_coh, plot=True)
-                        print('COVARIANCE')
-                        if False:
-                            l = int(
-                                np.floor(np.sqrt(ml_size[0] * ml_size[1]))/2)
-
-                            decay = np.array(
-                                [0.00001, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99])
-                            samples = 1000
-                            rs_decays = np.zeros((decay.shape[0], samples))
-                            for i in range(len(decay)):
-                                C_decay = greg_sim.decay_model(
-                                    R=1, L=l, P=cov.cov.shape[0], coh_decay=decay[i], coh_infty=0.05, returnC=True)
-                                print(C_decay.shape)
-                                rs_decay = bootstrap_correlation(
-                                    C_decay, l, triplets, nsample=samples, fitLine=False)
-                                rs_decays[i] = rs_decay
-
-                            rs_sim, coeffs_sim = bootstrap_correlation(
-                                cov.cov[:, :, j, i], l, triplets, nsample=1000, fitLine=True, zeroPhi=True)
-
-                            plot_hist(rs_sim, r, rs_decays, decay)
-                            fig, ax = plt.subplots(ncols=3, nrows=1)
-                            bins = 100
-                            ax[0].hist(rs_sim.flatten(), bins=bins)
-                            ax[0].axvline(r, 0, 1, color='red')
-                            ax[0].set_title('Rs')
-
-                            ax[1].hist(coeffs_sim[0].flatten(), bins=bins)
-                            ax[1].axvline(coeff[0], 0, 1, color='red')
-                            ax[1].set_title('Slope')
-
-                            ax[2].hist(coeffs_sim[1].flatten(), bins=bins)
-                            ax[2].axvline(coeff[1], 0, 1, color='red')
-                            ax[2].set_title('Mean Residual Phase')
-
-                            plt.show()
-
-                        # fig, ax = plt.subplots(nrows=1, ncols=2)
-                        # n, bins, p = ax[0].hist(r2, bins=60)
-                        # ax[0].axvline(r, 0, 1, color='red')
-                        # ax[0].set_title('Phi = observed')
-                        # ax[0].set_xlabel('Correlation Coefficient')
-
-                        # n, bins, p = ax[1].hist(r2_phizero, bins=60)
-                        # ax[1].axvline(r, 0, 1, color='red')
-
-                        # ax[1].set_title('Phi = zero')
-                        # ax[1].set_xlabel('Correlation Coefficient')
-
-                        # plt.show()
 
                         x = np.linspace(window_amps.min() - 0.1 * np.abs(window_amps.min()),
                                         window_amps.max() + 0.1 * np.abs(window_amps.max()), 100)
 
                         fig, ax = plt.subplots(figsize=(5, 2.5))
 
-                        # xy = np.vstack(
-                        #     [window_amps.flatten(), np.angle(window_closure).flatten()])
-                        # z = gaussian_kde(xy)(xy)
                         ax.scatter(window_amps.flatten(), np.angle(
                             window_closure).flatten(), s=10)
 
@@ -420,7 +370,7 @@ def main():
                             x, coeff, form=fitform), '--', label='Fit: mx')
 
                         ax.plot(x, closures.eval_sytstematic_closure(
-                            x, coeff, form='lineari'), '--', label='Fit: mx+b')
+                            x, clin, form='lineari'), '--', label='mx+b')
                         ax.axhline(y=0, color='k', alpha=0.1)
                         ax.axvline(x=0, color='k', alpha=0.1)
                         ax.set_xlabel('Amplitude Triplet')
@@ -449,20 +399,21 @@ def main():
                         np.save(os.path.join(
                             pixel_data_folder_path, 'coeff.np'), coeff)
                         np.save(os.path.join(
-                            pixel_data_folder_path, 'C_raw.np'), uncorrected[:, :, j, i])
+                            pixel_data_folder_path, 'C_raw.np'), cov.cov[:, :, j, i])
                         np.save(os.path.join(
                             pixel_data_folder_path, 'C_ln_slope.np'), error_coh)
-                        np.save(os.path.join(
-                            pixel_data_folder_path, 'C_ln_unc.np'), error_coh_unc)
+                        # np.save(os.path.join(
+                        #     pixel_data_folder_path, 'C_ln_unc.np'), error_coh_unc)
                         np.save(os.path.join(
                             pixel_data_folder_path, 'Intensities.np'), raw_intensities)
 
-                        # plt.show()
+                        lat = lats[j, i]
+                        lon = lons[j, i]
 
+                        np.save(os.path.join(
+                            pixel_data_folder_path, 'latlon.np'), np.array([lat, lon]))
                         fig, ax = plt.subplots(
                             nrows=3, ncols=1, figsize=(5, 5))
-                        # slope_stderr = np.sqrt(covm[0][0])
-                        # intercept_stderr = np.sqrt(covm[1][1])
 
                         xy = np.vstack(
                             [window_amps.flatten(), np.angle(window_closure).flatten()])
@@ -472,10 +423,12 @@ def main():
                             window_closure).flatten(), c=z, s=10)  # alpha=(alphas)**(1))
 
                         ax[0].plot(x, closures.eval_sytstematic_closure(
-                            x, coeff, form=fitform), '--', label='Fit: mx')
-
+                            x, coeff, form=fitform), '--', label='Fit: nl')
                         ax[0].plot(x, closures.eval_sytstematic_closure(
-                            x, coeff, form='lineari'), '--', label='Fit: mx+b')
+                            x, clin, form=fitform), '--', label='Fit: lin')
+
+                        # ax[0].plot(x, closures.eval_sytstematic_closure(
+                        #     x, coeff, form='lineari'), '--', label='Fit: mx+b')
                         ax[0].set_title(f'r: {np.round(r, 3)}')
                         ax[0].set_ylabel(r'$\Xi$')
                         ax[0].set_xlabel(
@@ -488,30 +441,17 @@ def main():
 
                         iratios = closures.coherence_to_phivec(intensities)
 
-                        nl_phases_uncorrected = np.angle(
-                            closures.coherence_to_phivec(error_coh_unc))
+                        # nl_phases_uncorrected = np.angle(
+                        #     closures.coherence_to_phivec(error_coh_unc))
 
                         nlphases = np.angle(
                             closures.coherence_to_phivec(error_coh))
 
-                        nlphases_int = np.angle(
-                            closures.coherence_to_phivec(error_coh_int))
-
-                        # print(m)
                         x = np.linspace(iratios.min(
                         ) - 0.1 * np.abs(iratios.min()), iratios.max() + 0.1 * np.abs(iratios.max()), 100)
 
                         max_range = np.max(np.abs(iratios))  # + 0.1
                         x = np.linspace(-max_range, max_range, 100)
-
-                        # ax[1].scatter(iratios, nlphases, s=15,
-                        #               marker='x', color='blue', label='/w a linear component to force monotonicity')
-
-                        # ax[1].scatter(iratios, nl_phases_uncorrected, s=10,
-                        #               marker='x', color='black', label='From Uncorrected Closures')
-
-                        # ax[1].scatter(iratios, nlphases_int, s=15,
-                        #               marker='x', color='orange', label='With Intercept')
 
                         ax[1].scatter(iratios, nlphases, s=20,
                                       marker='x', color='blue', label='mx')
@@ -534,14 +474,8 @@ def main():
                         u, s = np.unique(baslines_b, return_index=True)
                         split_residuals_b = np.split(residual_closure, s[1:])
 
-                        # ax[2].scatter(
-                        #     baslines_a, residual_closure, s=10, label='a')
                         ax[2].boxplot(split_residuals_b,
                                       positions=u, widths=9)
-                        # ax[2].boxplot(split_residuals_b)
-
-                        # ax[2].scatter(
-                        #     baslines_b, residual_closure, s=10, label='b', alpha=0.5)
                         ax[2].set_xlabel('basline')
                         ax[2].set_ylabel('Closures')
                         ax[2].legend(loc='lower right')
@@ -549,93 +483,26 @@ def main():
                         plt.tight_layout()
                         plt.show()
 
-                        fig, ax = plt.subplots(ncols=2, nrows=1)
-                        ax[0].hist(np.angle(window_closure).flatten(), bins=50)
-                        # ax[0].set_title()
-                        ax[1].hist(window_amps.flatten(), bins=50)
-                        ax[1].set_title('Amp Triplet')
+                        # fig, ax = plt.subplots(ncols=2, nrows=1)
+                        # sns.kdeplot(np.angle(window_closure).flatten(),
+                        #             bw_adjust=0.5, ax=ax[0])
+                        # ax[0].set_title('Closure Phases')
+                        # sns.kdeplot(window_amps.flatten(),
+                        #             bw_adjust=0.5, ax=ax[1])
+                        # ax[1].set_title('Amp Triplet')
 
-                        plt.show()
-
-                        fig, ax = plt.subplots(nrows=1, ncols=2)
-
-                        residual = np.angle(window_closure.flatten() *
-                                            np.exp(1j * -1 * est_closures))
-                        ax[0].hist(
-                            np.angle(np.exp(1j*est_closures)).flatten(), bins=60, density=True)
-                        ax[0].set_title('Predicted')
-
-                        ax[1].hist(residual, bins=60, density=True)
-                        ax[1].set_title(
-                            f'Residual Mean: {np.round(np.mean(residual), 2)} -- Intercept: {np.round(coeff[1], 2)}')
-                        plt.show()
-
-                        fig, ax = plt.subplots(nrows=1, ncols=3)
-                        ax[0].set_title(
-                            'Estimated Phase Error -- slope')
-
-                        ax[0].imshow(np.angle(error_coh),
-                                     vmin=-np.pi/15, vmax=np.pi/15, cmap=plt.cm.seismic)
-
-                        ax[0].set_xlabel('Reference Image')
-                        ax[0].set_ylabel('Secondary Image')
-                        ax[1].set_title(
-                            'Estimated Phase Error -- intercept')
-                        im = ax[1].imshow(np.angle(error_coh_int * error_coh.conj()),
-                                          vmin=-np.pi/15, vmax=np.pi/15, cmap=plt.cm.seismic)
-
-                        ax[1].set_xlabel('Reference Image')
-                        ax[1].set_ylabel('Secondary Image')
-
-                        ax[2].set_title(
-                            'Estimated Phase Error -- all')
-                        im = ax[2].imshow(
-                            np.angle(error_coh_unc), vmin=-np.pi/5, vmax=np.pi/5, cmap=plt.cm.seismic)
-
-                        ax[2].set_xlabel('Reference Image')
-                        ax[2].set_ylabel('Secondary Image')
-
-                        fig.subplots_adjust(right=0.8)
-                        cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-                        fig.colorbar(im, cax=cbar_ax,
-                                     label='Estimated Nonlinear Phase Error (rad)')
-                        plt.show()
+                        # plt.show()
 
                     else:
                         r = 0
-                    # except:
-                    #     # print('robust regression failed :(')
-                    #     poly[j, i, :] = np.zeros((2))
-                    #     rs[j, i] = 0
             if (j % 1) == 0 and i == 0:
                 print(
                     f'Phase Closure Correction Progress: {(j/amp_triplet_stack.shape[1]* 100)}%')
 
-    fig, ax = plt.subplots(nrows=1, ncols=1)
-    im = ax.imshow(poly[:, :, 1], cmap=plt.cm.seismic, vmin=-1, vmax=1)
-    ax.tick_params(labelbottom=False, labelleft=False)
-    plt.colorbar(im, ax=ax, orientation='horizontal')
-    plt.savefig('/Users/rbiessel/Documents/dalton_intercept.png',
-                transparent=True, dpi=300)
-    plt.show()
-
-    ax = plt.subplot()
-    im = ax.imshow(rs**2, vmin=0, vmax=1, cmap=plt.cm.YlOrRd)
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    plt.colorbar(im, cax=cax)
-
-    ax.scatter(points[:, 0], points[:, 1], s=30,
-               facecolors='none', edgecolors='black')
-    ax.tick_params(labelbottom=False, labelleft=False)
-    plt.tight_layout()
-    plt.savefig('/Users/rbiessel/Documents/dalton_rsquared.png',
-                transparent=True, dpi=300)
-    plt.show()
-
     TS_method = inputs.phaselinking
 
     for m in range(N, N+1):
+        # m = 2
         coherence_m = sarlab.reduce_cov(coherence, keep_diag=m)
         uncorrected_m = sarlab.reduce_cov(uncorrected, keep_diag=m)
 
@@ -657,23 +524,66 @@ def main():
 
         avg_coherence = sarlab.mean_coh(uncorrected)
 
-        plt.imshow(avg_coherence)
+        for i in range(normed_dif.shape[2]):
+            plt.imshow(normed_dif[:, :, i],
+                       cmap=plt.cm.seismic, vmin=-3, vmax=3)
+            plt.title(f'Difference, {i}')
+            plt.show()
+        # Compute phase bias and intensit rate
+
+        x = np.arange(0, normed_dif.shape[2]) * 12
+        print(x.shape)
+        difference_flattened = normed_dif.reshape(
+            normed_dif.shape[0] * normed_dif.shape[1], normed_dif.shape[2])
+
+        print(intensity.shape)
+        print(normed_dif.shape)
+        intensity_flattened = intensity.reshape(
+            normed_dif.shape[0] * normed_dif.shape[1], normed_dif.shape[2])
+
+        intensity_rate = np.polyfit(x, intensity_flattened.T, 1)
+
+        bias = np.polyfit(x, difference_flattened.T, 1)
+        bias = bias[0, :].reshape(
+            normed_dif.shape[0], normed_dif.shape[1])
+
+        intensity_rate = intensity_rate[0, :].reshape(
+            normed_dif.shape[0], normed_dif.shape[1])
+
+        fig, ax = plt.subplots(nrows=1, ncols=2)
+        ax[0].imshow(bias * 365, vmin=-10, vmax=10, cmap=plt.cm.seismic)
+        ax[1].imshow(intensity_rate * 365, vmin=-10,
+                     vmax=10, cmap=plt.cm.seismic)
+
+        ax[0].set_title('Velocity Bias')
+        ax[1].set_title('Intensity Rate')
+        plt.show()
+
+        plt.scatter(intensity_rate.flatten() * 365, (bias * np.sign(poly[:, :, 0])).flatten()
+                    * 365, alpha=0.5, color='black')
+        plt.xlabel('Intensity Rate [dB/yr]')
+        plt.ylabel('Velocity Bias [mm/yr]')
         plt.show()
 
         if inputs.saveData:
             for pixel in points:
                 pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{pixel[0]}_{pixel[1]}/'
+                if inputs.kappaOpt:
+                    pixel_data_folder_path = f'/Users/rbiessel/Documents/InSAR/plotData/{inputs.label}/p_{pixel[0]}_{pixel[1]}_kappa/'
                 fig, ax = plt.subplots(figsize=(5, 2.5))
 
-                plt.plot(normed_dif[pixel[1], pixel[0]])
+                x = np.arange(0, normed_dif.shape[2])
+                slope = np.polyfit(x, normed_dif[pixel[1], pixel[0]], 1)[0]
+                plt.plot(x, normed_dif[pixel[1], pixel[0]])
+                plt.plot(x, x * slope, '--')
                 plt.ylabel('mm')
                 plt.xlabel('Time (days)')
                 plt.tight_layout()
 
                 plt.savefig(os.path.join(
-                    pixel_data_folder_path, f'displacementDiff_{m}.png'), dpi=200)
+                    pixel_data_folder_path, f'displacementDiff.png'), dpi=200)
                 # plt.show()
-                np.save(os.path.join(pixel_data_folder_path, f'dispDiff_{m}.np'),
+                np.save(os.path.join(pixel_data_folder_path, f'dispDiff.np'),
                         normed_dif[pixel[1], pixel[0]])
 
                 # Plot residual
@@ -685,14 +595,24 @@ def main():
                 C_unc = uncorrected[:, :, pixel[1], pixel[0]]
                 print(C_unc.shape, C_pred.shape)
 
-                # fig, ax = plt.subplots(ncols=2, nrows=1)
-                # ax[0].imshow(np.angle(C_pred), cmap=plt.cm.seismic)
-                # ax[1].imshow(np.angle(C_unc * C_pred.conj()),
-                #              cmap=plt.cm.seismic)
-                # plt.show()
+                plt.show()
+    max_dif = np.max(normed_dif, axis=2)
+    min_dif = np.min(normed_dif, axis=2)
+    max_difshape = max_dif.shape
 
-    normed_dif_sum = np.sum(normed_dif, axis=2)
-    plt.imshow(normed_dif_sum, cmap=plt.cm.seismic, vmin=-10, vmax=10)
+    max_dif[np.where(np.abs(min_dif) > max_dif)
+            ] = min_dif[np.where(np.abs(min_dif) > max_dif)]
+
+    plt.imshow(max_dif, cmap=plt.cm.seismic, vmin=-10, vmax=10)
+    plt.title('Max Difference')
+    plt.scatter(points[:, 0], points[:, 1], s=30,
+                facecolors='none', edgecolors='b')
+    plt.show()
+
+    plt.imshow(rs, cmap=plt.cm.seismic, vmin=-1, vmax=1)
+    plt.scatter(points[:, 0], points[:, 1], s=30,
+                facecolors='none', edgecolors='b')
+    plt.title('R')
     plt.show()
 
     cov = None
@@ -721,18 +641,33 @@ def main():
                           './correlation.fit')
 
     dif_path = os.path.join(os.getcwd(), outputs,
-                            './sum_difference.fit')
+                            './max_difference.fit')
     coherence_path = os.path.join(os.getcwd(), outputs,
                                   './average_coherence.fit')
 
     cumu_dif_path = os.path.join(os.getcwd(), outputs,
                                  './cumulative_difference.fit')
+    bias_path = os.path.join(os.getcwd(), outputs,
+                             './bias.fit')
+    irate_path = os.path.join(os.getcwd(), outputs,
+                              './irate.fit')
+
+    rsme_linear_path = os.path.join(os.getcwd(), outputs,
+                                    './rsme_linear.fit')
+
     io.write_image(r_path, rs.astype(np.float32), geocode=geom_path)
-    io.write_image(dif_path, normed_dif_sum.astype(
+    io.write_image(dif_path, max_dif.astype(
         np.float32), geocode=geom_path)
     io.write_image(coherence_path, avg_coherence.astype(
         np.float32), geocode=geom_path)
     io.write_image(cumu_dif_path, normed_dif[:, :, -1].astype(
+        np.float32), geocode=geom_path)
+    io.write_image(bias_path, bias.astype(
+        np.float32), geocode=geom_path)
+    io.write_image(irate_path, intensity_rate.astype(
+        np.float32), geocode=geom_path)
+
+    io.write_image(rsme_linear_path, rsme_linear.astype(
         np.float32), geocode=geom_path)
 
     poly = None

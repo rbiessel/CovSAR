@@ -15,6 +15,7 @@ import pandas as pd
 from datetime import datetime
 import colorcet as cc
 from matplotlib.cm import get_cmap
+import pub_pixels
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
 
@@ -50,7 +51,9 @@ def main():
     #                   & (df_DNWR['DATE'] <= vegas_dates.max())]
 
     keep = [0]
-    print(pixel_paths)
+    # print(pixel_paths)
+    # pixel_paths = ['/Users/rbiessel/Documents/InSAR/plotData/imnav/p_44_113/']
+    pixel_paths = [pub_pixels.pixel_paths[5]]
 
     # pixel_paths = [pixel_paths[2], pixel]
     pixel_paths = [pixel_paths[i] for i in keep]
@@ -63,6 +66,8 @@ def main():
     # PLOT SCATTER
     for p in range(len(pixel_paths)):
         ax = axes[0]
+        ax.set_title('(b) ', loc='left')
+
         path = pixel_paths[p]
         label = pixel_paths[p].split('/')[-3]
         C = np.load(os.path.join(
@@ -71,13 +76,21 @@ def main():
         C_ln_slope = np.load(os.path.join(
             path, 'C_ln_slope.np.npy'))
 
-        C_ln_unc = np.load(os.path.join(
-            path, 'C_ln_unc.np.npy'))
+        # C_ln_unc = np.load(os.path.join(
+        #     path, 'C_ln_unc.np.npy'))
 
         I = np.load(os.path.join(
             path, 'Intensities.np.npy'))
 
-        # plt.plot(I)
+        coherence = np.zeros(C.shape, dtype=np.complex64)
+        print('shape: ', coherence.shape)
+        for i in range(coherence.shape[0]):
+            for j in range(coherence.shape[1]):
+                if j >= i:
+                    coherence[i, j] = C[i, j] / \
+                        np.sqrt((C[i, i] * C[j, j]))
+                else:
+                    coherence[i, j] = coherence[j, i].conj()
 
         # Phase error
         mask_upper = np.zeros(C.shape)
@@ -98,11 +111,11 @@ def main():
             'extent': extent,
             'origin': 'upper'
         }
-        cohImg = ax.imshow(np.abs(C), alpha=mask_lower,
-                           cmap=cmap_cont, vmin=0, vmax=1, **shared_kwargs)
+        cohImg = ax.imshow(np.abs(coherence), alpha=mask_lower,
+                           cmap=cmap_cont, vmin=0, vmax=0.5, **shared_kwargs)
 
         phiImg = ax.imshow(np.angle(C_ln_slope), alpha=mask_upper,
-                           cmap=cmap_div, vmin=-np.pi/10, vmax=np.pi/10, **shared_kwargs)
+                           cmap=cmap_div, vmin=-0.15, vmax=0.15, **shared_kwargs)
 
         # intenImg = ax.imshow(diag_I, alpha=diag_mask,
         #                      cmap=cmap_cont, vmin=np.min(I), vmax=np.max(I), **shared_kwargs)
@@ -119,12 +132,12 @@ def main():
 
         # divider = make_axes_locatable(ax)
         # cax = divider.append_axes('right', size='10%', pad=0.1)
-        cbar = fig.colorbar(cohImg, aspect=10)
-        cbar.ax.set_title(r'[$\gamma$]')
+        cbar = fig.colorbar(cohImg, aspect=5, ax=ax, fraction=0.05)
+        cbar.ax.set_title(r'[$\lvert \gamma \rvert$]', pad=10)
 
         # # cax2 = divider.append_axes('right', size='10%', pad=0.50)
-        cbar2 = fig.colorbar(phiImg, aspect=10)
-        cbar2.ax.set_title('[$rad$]')
+        cbar2 = fig.colorbar(phiImg, aspect=5, ax=ax, fraction=0.05)
+        cbar2.ax.set_title('[$\mathrm{rad}$]', pad=10)
 
         # cax3 = divider.append_axes('right', size='10%', pad=0.50)
         # cbar3 = fig.colorbar(intenImg, cax=cax3)
@@ -137,21 +150,22 @@ def main():
         # ax.yaxis_date()
 
         ax = axes[1]
+        ax.set_title('(d) ', loc='left')
 
         differences = np.load(os.path.join(
             path, 'dispDiff.np.npy'))
 
         ax2 = ax.twinx()
-        l1, = ax2.plot(x_lims_SAR, differences, linewidth=2, color='tomato',
-                       label='Displacement \nDifference')
-        ax2.set_ylabel('[$mm$]')
+        l1, = ax2.plot(x_lims_SAR, differences, 'o-', linewidth=2, color='tomato',
+                       label=r'$\Delta s$', markersize=4)
+        ax2.set_ylabel(r'[$\mathrm{mm}$]')
         # ax2.set_ylim([-0.7, 0.7])
 
-        ax.set_ylabel('[$dB$]')
+        ax.set_ylabel(r'[$dB$]')
         # ax.set_ylim([38, 43])
 
-        l2, = ax.plot(x_lims_SAR, I - I[0], label='Intensity',
-                      color='steelblue', linewidth=2)
+        l2, = ax.plot(x_lims_SAR, I - I[0], 'o-', label='Intensity',
+                      color='steelblue', linewidth=2, markersize=4)
         ax.tick_params(axis='x', rotation=45)
 
         [ax.axvline(_x, linewidth=1, color='gray', alpha=0.2)
@@ -159,13 +173,14 @@ def main():
 
         ll = [l1, l2]
         ax.legend(ll, [ll_.get_label()
-                       for ll_ in ll], loc='lower right', fontsize='large')
+                       for ll_ in ll], loc='upper right', fontsize=10, ncol=2)
 
         ax.xaxis_date()
         date_format = mdates.DateFormatter('%Y-%m-%d')
         ax.xaxis.set_major_formatter(date_format)
 
         ax = axes[2]
+        ax.set_title('(f) ', loc='left')
 
         precip = df['PREC.I-1 (in) '].values * 25.4
         sm = df['SMS.I-1:-2 (pct) '].values
@@ -176,21 +191,29 @@ def main():
 
         x_lims_WEATHER = mdates.date2num(weather_dates)
 
-        ax.set_ylabel('[$m^{3}/m^{3}$]')
-        ax.set_ylim([0, 70])
+        ax.set_ylabel(r'[$m^{3}/m^{3}$]')
+        ax.set_ylim([0, 40])
         ax2 = ax.twinx()
+        print(x_lims_WEATHER)
+        print(x_lims_SAR)
+
+        sm_sar = sm[np.intersect1d(
+            x_lims_WEATHER, x_lims_SAR, return_indices=True)[1]]
+
         l2 = ax2.bar(x_lims_WEATHER, deriv, label='Precipitation',
                      width=1.9, alpha=0.8, color='steelblue')
-        l1, = ax.plot(x_lims_WEATHER, sm, color='tomato',
-                      label='Soil Moisture', linewidth=2)
-        ax2.set_ylabel('[$mm$]')
-        ax2.set_ylim([0, 40])
+        # l1, = ax.plot(x_lims_WEATHER, sm, color='tomato',
+        #               label='Soil Moisture', linewidth=2)
+        l3, = ax.plot(x_lims_SAR, sm_sar, '-o', color='tomato',
+                      label='Soil Moisture', linewidth=2, markersize=4)
+        ax2.set_ylabel(r'[$\mathrm{mm}$]')
+        ax2.set_ylim([0, 35])
         [ax.axvline(_x, linewidth=1, color='gray', alpha=0.2)
          for _x in sar_dates]
         # ax.axhline(0, linewidth=1, color='red', alpha=0.2)
-        ll = [l1, l2]
+        ll = [l2, l3]
         ax2.legend(ll, [ll_.get_label() for ll_ in ll],
-                   loc='upper right', fontsize='large')
+                   loc='upper right', fontsize=10, ncol=2)
         ax.tick_params(axis='x', rotation=45)
 
         ax.xaxis_date()
@@ -198,7 +221,7 @@ def main():
         ax.xaxis.set_major_formatter(date_format)
         ax.set_xlim([x_lims_SAR[0], x_lims_SAR[-1]])
         plt.savefig(
-            '/Users/rbiessel/Documents/discussion_matrix_imnav.png', dpi=300)
+            '/Users/rbiessel/Documents/InSAR/closure_manuscript/figures/imnav_matrix.png', dpi=300, bbox_inches='tight')
         plt.show()
 
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(5, 3))
@@ -209,20 +232,21 @@ def main():
     phiErrors = np.angle(
         C_ln_slope[np.triu_indices_from(C_ln_slope)].flatten())
 
-    phiErrors_unc = np.angle(
-        C_ln_unc[np.triu_indices_from(C_ln_unc)].flatten())
+    # phiErrors_unc = np.angle(
+    #     C_ln_unc[np.triu_indices_from(C_ln_unc)].flatten())
 
     ax.scatter(dBs, phiErrors, alpha=0.5, color='black')
     # ax.scatter(dBs, phiErrors_unc, alpha=0.5, color='orange')
 
     ax.axvline(0, linewidth=1, color='gray', alpha=0.2)
     ax.axhline(0, linewidth=1, color='gray', alpha=0.2)
-    ax.set_xlabel('Intensity Difference [$dB$]')
-    ax.set_ylabel('Predicted Phase Error [$rad$]')
-
+    ax.set_xlabel('Intensity Difference [$\mathrm{dB}$]')
+    ax.set_ylabel('Predicted Phase Error [$\mathrm{rad}$]')
+    ax.set_title('(b) ', loc='left')
     plt.grid(alpha=0.2)
     plt.tight_layout()
-    plt.savefig('/Users/rbiessel/Documents/dBPhiScatter.png', dpi=300)
+    plt.savefig(
+        '/Users/rbiessel/Documents/InSAR/closure_manuscript/figures/dBPhiScatter_imnav.png', dpi=300)
     plt.show()
 
     # Coherence

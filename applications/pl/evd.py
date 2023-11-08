@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def eig_decomp(cov):
+def eig_decomp(cov, eigvector=0):
     cov = np.swapaxes(cov, 0, 2)
     cov = np.swapaxes(cov, 1, 3)
     shape = cov.shape
@@ -20,7 +20,7 @@ def eig_decomp(cov):
         W = None
         V = np.transpose(V, axes=(0, 2, 1))
         # select the last eigenvector (the one corresponding to the largest lambda)
-        v = V[:, shape[-1] - 1]
+        v = V[:, shape[-1] - 1 - eigvector]
         V = None
         scaling = np.abs(v[:, 0])
         scaling[scaling == 0] = 1

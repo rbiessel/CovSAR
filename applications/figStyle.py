@@ -1,10 +1,14 @@
 from matplotlib import pyplot as plt
+import logging
+
+mpl_logger = logging.getLogger('matplotlib')
+mpl_logger.setLevel(logging.WARNING)
 globfigparams = {
-    'fontsize': 8, 'family': 'serif', 'usetex': True,
+    'fontsize': 14, 'family': 'serif', 'usetex': True,
     'preamble': r'\usepackage{amsmath} \usepackage{amssymb} \usepackage{times} \usepackage{mathtools}',
     'column_inch': 229.8775 / 72.27, 'markersize': 24, 'markercolour': '#AA00AA',
     'fontcolour': 'black', 'tickdirection': 'out', 'linewidth': 0.5,
-    'ticklength': 2.50, 'minorticklength': 1.1}
+    'ticklength': 2.50, 'minorticklength': 1.1, }
 
 # colsbg = ['#19192a', '#626282', '#aaaabe', '#cbcbd7']
 plt.rc('font', **

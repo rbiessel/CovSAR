@@ -14,14 +14,22 @@ mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
 stack_path = '/Users/rbiessel/Documents/InSAR/Toolik/Fringe/slope_mtn/SLC/**/*.slc.full'
 stack_path = '/Users/rbiessel/Documents/InSAR/vegas_all/subsetB/SLC/**/*.slc.full'
-forward_model = SMForward(1/10, 0.1, 0.5, 0.001)
+forward_model = SMForward(imag_slope=0.01, r_A=0.005, r_B=0, r_C=4)
+forward_model = SMForward(imag_slope=0.01, r_A=0.008, r_B=0, r_C=4)
+
+scenarios = {
+    'high': 0,
+    'medium': 1,
+    'low': 2
+}
+
+base_path = '/Users/rbiessel/Documents/InSAR/plotData/sim'
 
 
 def main():
 
     files = glob.glob(stack_path)
     files = sorted(files)
-    # files = files[0:5]
     dates = []
     for file in files:
         date = file.split('/')[-2]
@@ -56,7 +64,11 @@ def main():
     C = coh[:, :, 5, 5]
     I = intensity[5, 5, :]
 
-    sm = I * 10
+    sm = I * 1.5
+
+    plt.plot(sm)
+    plt.ylabel('sm')
+    plt.show()
 
     forward_model.set_moistures(sm)
     forward_model.plot_dielectric()
@@ -74,7 +86,7 @@ def main():
 
     for i in range(C.shape[0]):
         for j in range(C.shape[0]):
-            C[i, j] = forward_model.get_phases_dezan(sm[i], sm[j])
+            C[i, j] = forward_model.get_phases_dezan(sm[j], sm[i])
 
     for i in range(len(triplets)):
         triplet = triplets[i]
@@ -84,7 +96,7 @@ def main():
                                                                    triplet[2]] * C_true[triplet[0], triplet[2]].conj()
 
         amp_triplet = sarlab.intensity_closure(
-            I[triplet[0]], I[triplet[1]], I[triplet[2]], norm=False, cubic=False, filter=1, inc=None)
+            I[triplet[0]], I[triplet[1]], I[triplet[2]], norm=False, cubic=False, filter=1, kappa=1)
 
         closure_stack_simulated[i] = closure
         closure_stack_observed[i] = closure_observed
@@ -99,7 +111,6 @@ def main():
     diag_mask = np.ones([C.shape[0]])
     diag_mask = np.diag(diag_mask)
     diag_I = np.diag(I)
-    print(diag_I)
 
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(8, 5))
 
@@ -123,37 +134,39 @@ def main():
 
     ax[1].imshow(diag_I, alpha=diag_mask,
                  cmap=plt.cm.cividis, vmin=np.min(I), vmax=np.max(I))
-
-    # ax[2].plot(sm)
-    # ax[2].set_xlabel('Time')
-    # ax[2].set_ylabel('Relative Soil Moisture')
-
-    # print(intensity_triplets.dtype)
-    # r, pval = stats.pearsonr(
-    #     intensity_triplets, np.angle(closure_stack_simulated))
-    # ax[3].scatter(intensity_triplets, np.angle(
-    #     closure_stack_simulated), s=10, color='black', alpha=0.3)
-
-    # ax[3].set_xlabel(r'$\mathfrak{S} [$-$]  $')
-    # ax[3].set_ylabel(r'$\Xi$ [$rad$]')
-    # ax[3].axhline(y=0, color='k', alpha=0.15)
-    # ax[3].axvline(x=0, color='k', alpha=0.15)
-    # ax[3].grid(alpha=0.2)
-
-    # labels = []
-    # labels.append(f'R$^{{2}} = {{{np.round(r**2, 2)}}}$')
-
-    # handles = [mpl_patches.Rectangle((0, 0), 1, 1, fc="white", ec="white",
-    #                                  lw=0, alpha=0)] * 2
-    # # create the legend, supressing the blank space of the empty line symbol and the
-    # # padding between symbol and label by setting handlelenght and handletextpad
-
-    # ax[3].legend(handles, labels, loc='best', fontsize='medium',
-    #              fancybox=True, framealpha=0.7,
-    #              handlelength=0, handletextpad=0)
     plt.tight_layout()
-    plt.savefig('/Users/rbiessel/Documents/simulated_scatter.png', dpi=300)
+    # plt.savefig('/Users/rbiessel/Documents/simulated_scatter.png', dpi=300)
     plt.show()
+
+    fig, ax = plt.subplots()
+    # print(intensity_triplets.dtype)
+    r, pval = stats.pearsonr(
+        intensity_triplets, np.angle(closure_stack_simulated))
+    ax.scatter(intensity_triplets, np.angle(
+        closure_stack_simulated), s=10, color='black', alpha=0.3)
+
+    ax.set_xlabel(r'$\mathfrak{S} [$-$]  $')
+    ax.set_ylabel(r'$\Xi$ [$rad$]')
+    ax.axhline(y=0, color='k', alpha=0.15)
+    ax.axvline(x=0, color='k', alpha=0.15)
+    ax.grid(alpha=0.2)
+
+    labels = []
+    labels.append(f'R$^{{2}} = {{{np.round(r**2, 2)}}}$')
+
+    handles = [mpl_patches.Rectangle((0, 0), 1, 1, fc="white", ec="white",
+                                     lw=0, alpha=0)] * 2
+    # create the legend, supressing the blank space of the empty line symbol and the
+    # padding between symbol and label by setting handlelenght and handletextpad
+
+    ax.legend(handles, labels, loc='best', fontsize='medium',
+              fancybox=True, framealpha=0.7,
+              handlelength=0, handletextpad=0)
+    plt.tight_layout()
+    plt.savefig(
+        '/Users/rbiessel/Documents/InSAR/closure_manuscript/simulated_scatter.png', dpi=300)
+    plt.show()
+
 
     # Apply phases via
 main()

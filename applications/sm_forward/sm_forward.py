@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 class SMForward:
     '''
         Object for performing soil-moisture phase contribution simulations based on sensitivity of soil dielectric properties to soil moisture
+        From De Zan et a., 2015
     '''
     mvs: np.array = None
     de_real = None
@@ -27,7 +28,6 @@ class SMForward:
 
     def set_moistures(self, mvs):
         self.mvs = mvs
-        # self.real_B + self.real_A * self.mvs**2
         self.de_real = self.mv2eps_real(self.mvs)
         self.de_imag = self.mv2eps_imag(self.mvs)  # self.mvs * self.imag_slope
 

@@ -1,42 +1,60 @@
+from pub_pixels import pixel_paths
 from threading import main_thread
 from matplotlib import pyplot as plt
 import numpy as np
 import figStyle
 from greg.simulation import decay_model
 import bootstrapCov
+import seaborn as sns
+import os
+
+colors = ['steelblue', 'tomato', '#646484']
 
 
-def plot_hist(correlations, r, rs_decays, decay):
+data = np.array(pixel_paths).reshape((2, 3))
 
-    fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(8, 4))
-    bins = 50
 
-    hist_kwargs = figStyle.hist_kwargs.copy()
+fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(7, 5))
 
-    hist_kwargs['log'] = False
+print(axes.shape)
+print(data.shape)
 
-    ax[0].hist(correlations.flatten(), **hist_kwargs,
-               color=figStyle.hist_colors[0], label='Speckle Realizations')
+hist_kwargs = figStyle.hist_kwargs.copy()
 
-    ax[0].hist(correlations.flatten(),  **hist_kwargs,
-               color=figStyle.hist_colors[0], histtype='step')
+labels = np.array([['(a)', '(b)', '(c)'], ['(d)', '(e)', '(f)']])
 
-    ax[0].set_xlabel('Simulated R [$-$]')
-    ax[0].set_ylabel('Frequency')
-    ax[0].set_title('(a) Correlations from Observed Covariance', loc='left')
-    ax[0].axvline(r, 0, 1, color='red',
-                  label='Observation', alpha=0.8)
+print(labels.shape)
+for i in range(labels.shape[0]):
+    for j in range(labels.shape[1]):
+        ax = axes[i, j]
 
-    lim = np.abs(r) + 0.1
-    ax[0].set_xlim([-lim, lim])
-    ax[0].legend(loc='best')
+        hist_kwargs['log'] = False
 
-    ax[1].violinplot(
-        rs_decays.T, positions=decay, widths=0.05, showmedians=True)
-    ax[1].set_xlabel('Coherence Decay Rate')
-    ax[1].set_ylabel('Correlation Coefficient')
-    ax[1].set_title(
-        '(b) Correlations from Various Coherence Decay Rates', loc='left')
-    plt.tight_layout()
-    plt.savefig('/Users/rbiessel/Documents/bootstrapHist.png', dpi=300)
-    plt.show()
+        r_sim = np.load(os.path.join(data[i, j], 'rs_sim.npy'))
+        R_sigma_p = np.load(os.path.join(data[i, j], 'R_sigma_p.npy'))
+        r = R_sigma_p[0]
+
+        label = data[i, j].split('/')[-3]
+        sns.kdeplot(r_sim.flatten(),
+                    bw_adjust=.5, color=colors[2], ax=ax, fill=True, alpha=0.1, linewidth=2, clip=(-1, 1))
+
+        ax.set_xlabel('R [$-$]')
+        ax.set_ylabel('')
+        # ax[i].set_title(label)
+        ax.axvline(r, 0, 1, color=colors[1],
+                   label='Observation', alpha=1)
+
+        lim = np.max(r_sim) + 0.1
+        if np.abs(r) > np.max(r_sim):
+            lim = np.abs(r) + 0.1
+
+        ax.set_xlim([-lim, lim])
+        yticks = [0, 1, 2]
+        ax.set_yticks(yticks, labels=yticks)
+        ax.set_title(labels[i, j], loc='left')
+    axes[i, 0].set_ylabel('Density')
+
+plt.tight_layout()
+plt.savefig(
+    '/Users/rbiessel/Documents/InSAR/closure_manuscript/figures/bootstrapHist.png', dpi=300)
+plt.show()

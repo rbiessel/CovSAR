@@ -87,8 +87,7 @@ def main():
 
     SLCs = glob.glob(os.path.join(base_path, '*.slc'))
 
-    # Filter by polariztaion, just VV for now
-    SLCs = [slc for slc in SLCs if inputs.pol in slc]
+    SLCs = [slc for slc in SLCs if inputs.pol[0] in slc]
 
     lookfile = glob.glob(os.path.join(base_path, '*.llh'))[0]
     lookfile_out = os.path.join(

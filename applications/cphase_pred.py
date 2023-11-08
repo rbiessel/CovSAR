@@ -1,81 +1,63 @@
 from scipy import stats
 import numpy as np
 import library as sarlab
+import closures
 
 
-def regress_intensity(window_closure, window_amps):
+def regress_intensity(phase_triplets, intensity_triplets, intensities, A, Adag, Cshape, plot=False):
+    '''
+        Returns error matrix, R, and a vector of the model coefficients
+    '''
 
-    if len(window_amps.flatten()) > 2 and len(window_closure.flatten()) > 2:
-        try:
-            r, p = stats.pearsonr(
-                window_amps.flatten(), np.angle(window_closure).flatten())
+    if len(intensity_triplets.flatten()) > 2 and len(phase_triplets.flatten()) > 2:
+        r, p = stats.pearsonr(
+            intensity_triplets.flatten(), phase_triplets.flatten())
 
-            r = r
-            fitform = 'linear'
+        fitform = 'linear'
 
-            coeff, covm = sarlab.gen_lstq(window_amps.flatten(), np.angle(window_closure).flatten(
-            ), W=None, function=fitform)
-        except:
-            print(window_amps.flatten())
-            print('')
-            print(np.angle(window_closure).flatten())
-            r = 0
-            p = 0
-            coeff = [0, 0]
+        coeff, covm = sarlab.gen_lstq(intensity_triplets.flatten(), (phase_triplets).flatten(
+        ), W=None, function=fitform)
 
-        do_huber = False
+        est_closures = closures.eval_sytstematic_closure(
+            intensity_triplets, model=coeff, form='linear')
 
-        poly[j, i, :] = coeff
+        # est_closures_int = closures.eval_sytstematic_closure(
+        #     intensity_triplets, model=coeff, form='lineari')
 
-        rs[j, i] = r
-        ps[j, i] = p
+        systematic_phi_errors = closures.least_norm(
+            A, est_closures, pinv=False, pseudo_inv=Adag)
 
-        # modeled systematic closures
-        if np.abs(r) >= 0:
+        # systematic_phi_errors_int = closures.least_norm(
+        #     A, est_closures_int, pinv=False, pseudo_inv=Adag)
 
-            est_closures = closures.eval_sytstematic_closure(
-                amp_triplet_stack[:, j, i], model=coeff, form='linear')
+        # uncorrected_phi_errors = closures.least_norm(
+        #     A, np.random.normal(loc=-0.02, scale=0.05, size=len(
+        #         closure_stack[:, j, i].flatten())), pinv=False, pseudo_inv=Adag)
 
-            est_closures_int = closures.eval_sytstematic_closure(
-                amp_triplet_stack[:, j, i], model=coeff, form='lineari')
+        # uncorrected_phi_errors = closures.least_norm(
+        #     A, closure_stack[:, j, i].flatten(), pinv=False, pseudo_inv=Adag)
 
-            systematic_phi_errors = closures.least_norm(
-                A, est_closures, pinv=False, pseudo_inv=A_dagger)
+        error_coh = closures.phivec_to_coherence(
+            systematic_phi_errors, Cshape)
 
-            systematic_phi_errors_int = closures.least_norm(
-                A, est_closures_int, pinv=False, pseudo_inv=A_dagger)
+        # error_coh_int = closures.phivec_to_coherence(
+        #     systematic_phi_errors_int, Cshape)
+        # error_coh_unc = closures.phivec_to_coherence(
+        #     uncorrected_phi_errors, Cshape)
 
-            uncorrected_phi_errors = closures.least_norm(
-                A, np.random.normal(loc=-0.02, scale=0.05, size=len(
-                    closure_stack[:, j, i].flatten())), pinv=False, pseudo_inv=A_dagger)
+        # gradient = interpolate_phase_intensity(
+        #     raw_intensities, error_coh)
 
-            uncorrected_phi_errors = closures.least_norm(
-                A, closure_stack[:, j, i].flatten(), pinv=False, pseudo_inv=A_dagger)
+        # gradient = 0
+        # linear_phase = np.exp(
+        #     1j * (-1 * intensities * gradient))
 
-            error_coh = closures.phivec_to_coherence(
-                systematic_phi_errors, coherence[:, :, j, i].shape[0])
+        # error_coh = error_coh * linear_phase
 
-            error_coh_int = closures.phivec_to_coherence(
-                systematic_phi_errors_int, coherence[:, :, j, i].shape[0])
-            error_coh_unc = closures.phivec_to_coherence(
-                uncorrected_phi_errors, coherence[:, :, j, i].shape[0])
-
-            # gradient = interpolate_phase_intensity(
-            #     raw_intensities, error_coh)
-
-            # gradient = 0
-            # linear_phase = np.exp(
-            #     1j * (-1 * intensities * gradient))
-
-            # error_coh = error_coh * linear_phase
-
-            coherence[:, :, j, i] = coherence[:,
-                                              :, j, i] * error_coh.conj()
-
-            # coherence[:, :, j, i] = error_coh
+        # coherence[:, :, j, i] = error_coh
 
         # o
-        if np.abs(r) > 1 or ((points == np.array([i, j])).all(1).any() and inputs.saveData):
+        if np.abs(r) > 1 and plot:
 
             # cum_closures = np.cumsum(
             #     np.angle(window_closure).flatten()[cumulative_mask])
@@ -160,16 +142,16 @@ def regress_intensity(window_closure, window_amps):
 
             # plt.show()
 
-            x = np.linspace(window_amps.min() - 0.1 * np.abs(window_amps.min()),
-                            window_amps.max() + 0.1 * np.abs(window_amps.max()), 100)
+            x = np.linspace(intensity_triplets.min() - 0.1 * np.abs(intensity_triplets.min()),
+                            intensity_triplets.max() + 0.1 * np.abs(intensity_triplets.max()), 100)
 
             fig, ax = plt.subplots(figsize=(5, 2.5))
 
             # xy = np.vstack(
             #     [window_amps.flatten(), np.angle(window_closure).flatten()])
             # z = gaussian_kde(xy)(xy)
-            ax.scatter(window_amps.flatten(), np.angle(
-                window_closure).flatten(), s=10)
+            ax.scatter(intensity_triplets.flatten(),
+                       (phase_triplets).flatten(), s=10)
 
             ax.plot(x, closures.eval_sytstematic_closure(
                 x, coeff, form=fitform), '--', label='Fit: mx')
@@ -198,9 +180,9 @@ def regress_intensity(window_closure, window_amps):
             plt.savefig(os.path.join(
                 pixel_data_folder_path, 'scatter.png'), dpi=200)
             np.save(os.path.join(pixel_data_folder_path,
-                                 'ampTriplets.np'), window_amps.flatten())
-            np.save(os.path.join(pixel_data_folder_path, 'closures.np'), np.angle(
-                window_closure).flatten())
+                                 'ampTriplets.np'), intensity_triplets.flatten())
+            np.save(os.path.join(pixel_data_folder_path, 'closures.np'), (
+                phase_triplets).flatten())
             np.save(os.path.join(
                 pixel_data_folder_path, 'coeff.np'), coeff)
             np.save(os.path.join(
@@ -220,11 +202,11 @@ def regress_intensity(window_closure, window_amps):
             # intercept_stderr = np.sqrt(covm[1][1])
 
             xy = np.vstack(
-                [window_amps.flatten(), np.angle(window_closure).flatten()])
+                [intensity_triplets.flatten(), (phase_triplets).flatten()])
             z = gaussian_kde(xy)(xy)
 
-            ax[0].scatter(window_amps.flatten(), np.angle(
-                window_closure).flatten(), c=z, s=10)  # alpha=(alphas)**(1))
+            ax[0].scatter(intensity_triplets.flatten(), np.angle(
+                phase_triplets).flatten(), c=z, s=10)  # alpha=(alphas)**(1))
 
             ax[0].plot(x, closures.eval_sytstematic_closure(
                 x, coeff, form=fitform), '--', label='Fit: mx')
@@ -276,8 +258,8 @@ def regress_intensity(window_closure, window_amps):
             ax[1].legend(bbox_to_anchor=(1.05, 0.5),
                          loc='center left', borderaxespad=0.)
 
-            residual_closure = np.angle(window_closure).flatten() - closures.eval_sytstematic_closure(
-                window_amps.flatten(), coeff, form='linear')
+            residual_closure = (phase_triplets).flatten() - closures.eval_sytstematic_closure(
+                intensity_triplets.flatten(), coeff, form='linear')
 
             indexsort = np.argsort(baslines_b)
             residual_closure = residual_closure[indexsort]
@@ -305,9 +287,9 @@ def regress_intensity(window_closure, window_amps):
             plt.show()
 
             fig, ax = plt.subplots(ncols=2, nrows=1)
-            ax[0].hist(np.angle(window_closure).flatten(), bins=50)
+            ax[0].hist((window_closure).flatten(), bins=50)
             # ax[0].set_title()
-            ax[1].hist(window_amps.flatten(), bins=50)
+            ax[1].hist(intensity_triplets.flatten(), bins=50)
             ax[1].set_title('Amp Triplet')
 
             plt.show()
@@ -356,9 +338,9 @@ def regress_intensity(window_closure, window_amps):
                          label='Estimated Nonlinear Phase Error (rad)')
             plt.show()
 
-        else:
-            r = 0
         # except:
         #     # print('robust regression failed :(')
         #     poly[j, i, :] = np.zeros((2))
         #     rs[j, i] = 0
+
+        return error_coh, r, coeff

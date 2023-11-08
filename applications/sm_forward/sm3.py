@@ -36,10 +36,6 @@ def main():
         m2 = np.random.normal(loc=10, scale=2, size=n)
         m3 = np.random.normal(loc=10, scale=2, size=n)
 
-        idif12 = forward_model.dubois_I_dif(m1, m2)
-        idif23 = forward_model.dubois_I_dif(m2, m3)
-        idif13 = forward_model.dubois_I_dif(m3, m1)
-
         sm_dif = m2 - m1
         # plt.scatter(m2 - m1, idif12, s=5)
         # coeff, res, a, b, c = np.polyfit(
@@ -60,7 +56,6 @@ def main():
         # plt.ylabel('Phase Difference')
         # plt.show()
 
-        amp_triplet = (idif12 * idif23 * idif13)
         closure = forward_model.get_phases_dezan(
             m1, m2) * forward_model.get_phases_dezan(m2, m3) * forward_model.get_phases_dezan(m3, m1)
 

@@ -152,13 +152,17 @@ def main():
 
     # Subset Geometry Files
     for file in files:
-        in_path = os.path.join(base_path, geom_dir, file)
-        out_path = os.path.join(
-            dest_path, geom_dir, os.path.basename(in_path))
-        subset_image(in_path, out_path, y1, y2, x1,
-                     x2, sample=inputs.sample_size)
+        try:
+            in_path = os.path.join(base_path, geom_dir, file)
+            out_path = os.path.join(
+                dest_path, geom_dir, os.path.basename(in_path))
+            subset_image(in_path, out_path, y1, y2, x1,
+                         x2, sample=inputs.sample_size)
+        except:
+            print(f'Failed to subset file {file}, skipping...')
 
-    SLCs = glob.glob(os.path.join(base_path, 'SLC', '**/[!geo_]*.slc.full'))
+    SLCs = glob.glob(os.path.join(base_path, 'SLC', '**/[!geo_]*.slc.full')) + glob.glob(
+        os.path.join(base_path, 'SLC', '**/[!geo_]*.slc'))
     for slc in SLCs:
         date = slc.split('/')[-2]
         out_folder = os.path.join(

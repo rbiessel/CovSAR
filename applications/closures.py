@@ -45,7 +45,7 @@ def get_adjacent_triplets(num):
     return np.sort(np.array(triplets))
 
 
-def get_triplets(num, force=None, all=False):
+def get_triplets(num, force=None, all=False, max=None, omit_phis=[]):
     '''
         Get the indexes of a unique set of combinations of the SLCs
     '''
@@ -59,10 +59,19 @@ def get_triplets(num, force=None, all=False):
         combinations = np.array(
             [triplet for triplet in combinations if triplet[0] == force])
 
+    if max is not None:
+        combinations = np.array(
+            [triplet for triplet in combinations if triplet.max() <= max])
+
+    if len(omit_phis) > 0:
+        for omit_phi in omit_phis:
+            combinations = np.array(
+                [triplet for triplet in combinations if int(omit_phi[0]) and int(omit_phi[1]) not in triplet])
+
     return combinations
 
 
-def build_A(triplets, coherence, zero_indexes=[]):
+def build_A(triplets, coherence, zero_indexes=[], omit_phis=[]):
     '''
       Using the triplet SLC indexes and an array of phi_indexes that
     '''
@@ -84,24 +93,21 @@ def build_A(triplets, coherence, zero_indexes=[]):
         i2 = np.where(phi_indexes == i2string)
         i3 = np.where(phi_indexes == i3string)
 
-        # a[i1] = 1
-        # a[i2] = -1
-        # a[i3] = 1
+        if i1 not in omit_phis and i2 not in omit_phis and i3 not in omit_phis:
+            if i1string in zero_indexes:
+                a[i1] = 0
+            else:
+                a[i1] = 1
 
-        if i1string in zero_indexes:
-            a[i1] = 0
-        else:
-            a[i1] = 1
+            if i2string in zero_indexes:
+                a[i2] = 0
+            else:
+                a[i2] = -1
 
-        if i2string in zero_indexes:
-            a[i2] = 0
-        else:
-            a[i2] = -1
-
-        if i3string in zero_indexes:
-            a[i3] = 0
-        else:
-            a[i3] = 1
+            if i3string in zero_indexes:
+                a[i3] = 0
+            else:
+                a[i3] = 1
 
     rank = np.linalg.matrix_rank(A)
 

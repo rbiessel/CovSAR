@@ -22,7 +22,7 @@ def eval_triplets(triplets, cov_matrix, filter_strength=1):
             filter_strength, filter_strength))
 
         amp_triplet = sarlab.intensity_closure(
-            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=False, cubic=False, filter=1, inc=None)
+            intensity[:, :, triplet[0]], intensity[:, :, triplet[1]], intensity[:, :, triplet[2]], norm=False, cubic=False, filter=1, kappa=1)
 
         closure_stack[i] = closure
         amp_triplet_stack[i] = amp_triplet
